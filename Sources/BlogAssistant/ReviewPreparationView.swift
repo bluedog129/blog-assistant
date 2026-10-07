@@ -14,6 +14,7 @@ struct ReviewPreparationView: View {
     @State private var errorMessage: String?
     @State private var savedMessage: String?
     @State private var closeConfirmation = false
+    @State private var draftVisible = false
 
     private var visit: PhotoVisit? { library.days.flatMap(\.visits).first { $0.id == visitID } }
     private var dirty: Bool { loaded && review != baseline }
@@ -32,6 +33,8 @@ struct ReviewPreparationView: View {
                     Text(review.restaurantName).font(.headline)
                 }
                 Spacer()
+                Button("블로그 초안") { draftVisible = true }
+                    .disabled(!canSave || dirty || needsConfirmation || !review.isReady)
                 Button("저장") { save() }.buttonStyle(.borderedProminent)
                     .disabled(!canSave || (!dirty && !needsConfirmation))
                     .keyboardShortcut("s", modifiers: .command)
@@ -132,10 +135,11 @@ struct ReviewPreparationView: View {
                 Text(review.isReady ? ((dirty || needsConfirmation) ? "필수 입력 완료 · 저장 필요" : "초안 생성 가능") : "입력 중 · 방문일과 메뉴명·감상을 채워주세요")
                     .font(.caption).foregroundStyle(review.isReady ? Color.green : Color.secondary)
             }
-            Text("현재 단계에서는 정보를 저장합니다. 초안 생성 기능은 다음 단계에서 추가됩니다.")
+            Text("필수 정보를 저장한 뒤 블로그 초안에서 생성·수정·복사할 수 있습니다.")
                 .font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(minWidth: 840, idealWidth: 1060, minHeight: 620, idealHeight: 760)
         .onAppear { load() }
+        .sheet(isPresented: $draftVisible) { DraftView(review: review, library: library) }
         .interactiveDismissDisabled(dirty)
         .confirmationDialog("입력한 변경사항을 저장할까요?", isPresented: $closeConfirmation, titleVisibility: .visible) {
             Button("저장하고 닫기") { if save() { dismiss() } }.disabled(!canSave)

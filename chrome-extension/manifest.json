@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "맛집 블로그 참고 글 수집",
+  "version": "0.1.0",
+  "description": "내 네이버 블로그 카테고리의 최근 글 최대 5개를 확인하고 Swift 앱에 붙여넣습니다.",
+  "permissions": ["scripting", "storage", "clipboardWrite"],
+  "host_permissions": ["https://blog.naver.com/*"],
+  "action": { "default_title": "참고 글 가져오기" },
+  "background": { "service_worker": "background.js" }
+}

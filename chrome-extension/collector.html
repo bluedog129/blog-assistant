@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>맛집 블로그 참고 글 수집</title><link rel="stylesheet" href="collector.css"></head>
+<body><main>
+<h1>최근 맛집 글 가져오기</h1>
+<p>Chrome에서 블로그를 열어 제목·게시일·본문과 사진 위치를 읽습니다. 결과를 확인한 뒤 복사하세요.</p>
+<form id="settings">
+<label>블로그 ID <input id="blogID" value="bluedog129" required pattern="[A-Za-z0-9_-]+"></label>
+<label>카테고리 번호 <input id="categoryNo" value="65" required pattern="[0-9]+"></label>
+<label>카테고리 이름 <input id="categoryName" value="맛집탐방" required></label>
+<button id="collect" type="submit">최근 글 최대 5개 가져오기</button>
+<button id="cancel" type="button" disabled>수집 중단</button>
+</form>
+<p id="status" role="status" aria-live="polite">블로그를 미리 열어둘 필요는 없습니다. 기본 설정은 bluedog129의 맛집탐방입니다.</p>
+<p id="warnings"></p><section id="articles"></section>
+<button id="copy" disabled>결과 복사 → Swift 앱에 붙여넣기</button>
+<p class="note">복사하면 현재 클립보드 내용이 바뀝니다. 비밀번호·쿠키와 사진 파일은 가져오지 않습니다. 페이지 구조가 달라지거나 접근이 제한되면 수집이 실패할 수 있습니다.</p>
+</main><script type="module" src="collector.js"></script></body></html>

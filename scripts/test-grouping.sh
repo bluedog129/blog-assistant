@@ -10,3 +10,7 @@ swiftc Sources/BlogAssistant/VisitGroupStore.swift Tests/VisitGroupStoreChecks.s
 .build/grouping-check/group-tests
 swiftc Sources/BlogAssistant/ReviewStore.swift Tests/ReviewStoreChecks.swift -o .build/grouping-check/review-tests
 .build/grouping-check/review-tests
+swiftc Sources/BlogAssistant/ReferenceStore.swift Tests/ReferenceStoreChecks.swift -o .build/grouping-check/reference-tests
+.build/grouping-check/reference-tests
+swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/ReferenceStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/DraftPrompt.swift Sources/BlogAssistant/DraftStore.swift Tests/DraftChecks.swift -o .build/grouping-check/draft-tests
+.build/grouping-check/draft-tests

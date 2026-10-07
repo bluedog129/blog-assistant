@@ -5,6 +5,7 @@ import SwiftUI
 struct PhotoThumbnail: View {
     let asset: PHAsset
     let manager: PHCachingImageManager
+    var showFullImage = false
     @State private var image: NSImage?
     @State private var requestID: PHImageRequestID?
     @State private var token: UUID?
@@ -16,8 +17,13 @@ struct PhotoThumbnail: View {
                 RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.1))
                 if let image {
                     GeometryReader { geometry in
-                        Image(nsImage: image).resizable().scaledToFill()
-                            .frame(width: geometry.size.width, height: geometry.size.height).clipped()
+                        if showFullImage {
+                            Image(nsImage: image).resizable().scaledToFit()
+                                .frame(width: geometry.size.width, height: geometry.size.height)
+                        } else {
+                            Image(nsImage: image).resizable().scaledToFill()
+                                .frame(width: geometry.size.width, height: geometry.size.height).clipped()
+                        }
                     }
                 } else if failed {
                     VStack(spacing: 8) {
@@ -27,7 +33,7 @@ struct PhotoThumbnail: View {
                 } else {
                     ProgressView().controlSize(.small)
                 }
-            }.aspectRatio(1, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 10))
+            }.aspectRatio(showFullImage ? CGFloat(max(1, asset.pixelWidth)) / CGFloat(max(1, asset.pixelHeight)) : 1, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 10))
             Text(asset.creationDate.map { $0.formatted(date: .omitted, time: .shortened) } ?? "시간 정보 없음")
                 .font(.caption).foregroundStyle(.secondary)
         }
