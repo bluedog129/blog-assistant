@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var selectedVisit: PhotoVisit?
     @State private var preparationVisit: PhotoVisit?
     @State private var referenceManagerVisible = false
+    @State private var chromeConnectionVisible = false
     @State private var visitFilter: VisitFilter = .pending
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 230), spacing: 16)]
 
@@ -50,6 +51,7 @@ struct ContentView: View {
                 }
                 Spacer()
                 Button("참고 글 관리") { referenceManagerVisible = true }
+                Button("Chrome 연결") { chromeConnectionVisible = true }
                 if library.canRead {
                     Button { library.refresh() } label: {
                         Label("새로고침", systemImage: "arrow.clockwise")
@@ -65,6 +67,7 @@ struct ContentView: View {
         }
         .task { library.refresh() }
         .sheet(isPresented: $referenceManagerVisible) { ReferenceManagerView() }
+        .sheet(isPresented: $chromeConnectionVisible) { ChromeConnectionView() }
         .sheet(item: $selectedVisit) { visit in
             VisitDetailView(visitID: visit.id, library: library)
         }

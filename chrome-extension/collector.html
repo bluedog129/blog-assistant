@@ -2,6 +2,8 @@
 <html lang="ko"><head><meta charset="utf-8"><title>맛집 블로그 참고 글 수집</title><link rel="stylesheet" href="collector.css"></head>
 <body><main>
 <h1>최근 맛집 글 가져오기</h1>
+<button id="pairApp">앱 연결 코드 복사 · 처음 한 번</button><button id="checkApp">앱 연결 상태 확인</button><p id="pairStatus"></p>
+<p><a href="posting.html">네이버에 글·사진 입력하고 임시저장</a></p>
 <p>Chrome에서 블로그를 열어 제목·게시일·본문과 사진 위치를 읽습니다. 결과를 확인한 뒤 복사하세요.</p>
 <form id="settings">
 <label>블로그 ID <input id="blogID" value="bluedog129" required pattern="[A-Za-z0-9_-]+"></label>
@@ -14,4 +16,4 @@
 <p id="warnings"></p><section id="articles"></section>
 <button id="copy" disabled>결과 복사 → Swift 앱에 붙여넣기</button>
 <p class="note">복사하면 현재 클립보드 내용이 바뀝니다. 비밀번호·쿠키와 사진 파일은 가져오지 않습니다. 페이지 구조가 달라지거나 접근이 제한되면 수집이 실패할 수 있습니다.</p>
-</main><script type="module" src="collector.js"></script></body></html>
+</main><script type="module" src="collector.js"></script><script type="module" src="pairing.js"></script></body></html>

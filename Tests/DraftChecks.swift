@@ -15,6 +15,9 @@ import Foundation
         do { _ = try DraftPrompt.make(review: incomplete, references: nil); fatalError("Accepted incomplete facts") } catch {}
         let generated = "제목\n\n[사진 1]\n\n본문"
         let photo = DraftPhoto(id: "private-photo-id", caption: "파스타")
+        let posting = try NaverPostPacket.make(text: generated, photos: [photo], filenames: ["01_파스타.jpg"])
+        precondition(posting.title == "제목" && posting.blocks.first?.photoNumber == 1 && posting.photos.first?.filename == "01_파스타.jpg")
+        do { _ = try NaverPostPacket.make(text: "제목\n[사진 2]\n본문", photos: [photo], filenames: ["01_파스타.jpg"]); fatalError("Accepted invalid posting photo") } catch {}
         let photoPrompt = try DraftPrompt.make(review: review, references: nil, photos: [photo])
         precondition(photoPrompt.contains("파스타") && photoPrompt.contains("[사진 1]"))
         precondition(!photoPrompt.contains("private-photo-id"))

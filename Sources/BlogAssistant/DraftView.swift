@@ -5,6 +5,7 @@ import SwiftUI
 struct DraftView: View {
     let review: VisitReview
     @ObservedObject var library: PhotoLibraryStore
+    @ObservedObject private var bridge = NaverBridge.shared
     @Environment(\.dismiss) private var dismiss
     @State private var references: ReferencePacket?
     @State private var referenceError: String?
@@ -24,6 +25,7 @@ struct DraftView: View {
     @State private var exporting = false
     @State private var exportTask: Task<Void, Never>?
     @State private var pendingPhoto: DraftPhoto?
+    @State private var chromeConnectionVisible = false
     private var dirty: Bool { text != baseline || photoConnectionChanged }
     private var assets: [PHAsset] {
         guard library.canRead else { return [] }
@@ -111,14 +113,19 @@ struct DraftView: View {
                     HStack {
                         Text(dirty ? "저장하지 않은 변경사항이 있습니다." : "붙여넣은 초안은 확인 후 저장하세요.").font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Button(exporting ? "사진 내보내는 중…" : "네이버용 사진 내보내기") { exportPhotos() }
+                        Button("네이버 임시저장") { sendToNaver() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(exporting || bridge.busy || text.isEmpty || dirty || loadFailed || !DraftLayout.warnings(text: text, photoCount: displayPhotos.count).isEmpty || !library.canRead)
+                        Button(exporting ? "사진 내보내는 중…" : "사진만 내보내기") { exportPhotos() }
                             .disabled(exporting || displayPhotos.isEmpty || !library.canRead)
                     }
-                    Text("사진 표시는 별도 줄에 [사진 1] 형식으로 입력하세요. 네이버 편집기에서는 표시 위치에 내보낸 사진을 직접 업로드합니다.").font(.caption).foregroundStyle(.secondary)
+                    Text(bridge.message).font(.caption).foregroundStyle(.secondary)
+                    Text("사진 표시는 별도 줄에 [사진 1] 형식으로 입력하세요. 네이버 임시저장은 이 위치에 사진을 넣고 임시저장까지 진행합니다.").font(.caption).foregroundStyle(.secondary)
                 }.padding(.leading, 12).frame(minWidth: 570)
             }
         }.padding(24).frame(minWidth: 980, idealWidth: 1180, minHeight: 700, idealHeight: 840)
         .onAppear { load() }
+        .sheet(isPresented: $chromeConnectionVisible) { ChromeConnectionView() }
         .sheet(item: $pendingPhoto) { photo in
             if let asset = assetMap[photo.id] {
                 PhotoCaptionEntry(asset: asset, manager: library.imageManager) { caption in
@@ -287,21 +294,51 @@ struct DraftView: View {
         preview = true
         message = "현재 사진을 연결했습니다. 위치를 확인한 뒤 초안 저장을 누르세요."
     }
-    private func exportPhotos() {
+    private func exportPhotos(includePost: Bool = false) {
+        if includePost {
+            do { _ = try NaverPostPacket.make(text: text, photos: displayPhotos, filenames: displayPhotos.map { $0.id }) }
+            catch { message = error.localizedDescription; return }
+        }
         let panel = NSOpenPanel()
         panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
         panel.prompt = "사진 내보내기"
         guard panel.runModal() == .OK, let folder = panel.url else { return }
         let photos = displayPhotos
         let mapping = assetMap
+        let postText = includePost ? text : nil
         exporting = true
         exportTask = Task { @MainActor in
             defer { exporting = false; exportTask = nil }
             do {
-                let result = try await DraftPhotoExporter.export(photos, assets: mapping, folder: folder)
-                message = "사진 \(photos.count)장을 내보냈습니다: \(result.lastPathComponent)"
+                let result = try await DraftPhotoExporter.export(photos, assets: mapping, folder: folder, postText: postText)
+                message = includePost ? "임시저장용 묶음을 내보냈습니다. Chrome 확장 프로그램의 네이버 임시저장에서 이 폴더의 파일들을 선택하세요." : "사진 \(photos.count)장을 내보냈습니다: \(result.lastPathComponent)"
                 NSWorkspace.shared.open(result)
             } catch { message = "사진 내보내기 실패: \(error.localizedDescription)" }
+        }
+    }
+    private func sendToNaver() {
+        guard bridge.ready else { chromeConnectionVisible = true; return }
+        let photos = displayPhotos
+        let mapping = assetMap
+        let content = text
+        do { _ = try NaverPostPacket.make(text: content, photos: photos, filenames: photos.map(\.id)) }
+        catch { message = error.localizedDescription; return }
+        exporting = true
+        exportTask = Task { @MainActor in
+            defer { exporting = false; exportTask = nil }
+            var prepared: URL?
+            do {
+                let folder = FileManager.default.temporaryDirectory.appendingPathComponent("NaverBridge", isDirectory: true)
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let result = try await DraftPhotoExporter.export(photos, assets: mapping, folder: folder, postText: content)
+                prepared = result
+                try Task.checkCancellation()
+                try await bridge.submit(folder: result)
+                message = "Chrome에서 처리 중입니다. 아래 진행 상태를 확인하세요."
+            } catch {
+                if let prepared { try? FileManager.default.removeItem(at: prepared) }
+                message = "네이버 전달 실패: \(error.localizedDescription)"
+            }
         }
     }
 }

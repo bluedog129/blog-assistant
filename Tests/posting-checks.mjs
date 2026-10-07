@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {validatePacket,validateContent} from '../chrome-extension/post-packet.js';
+const packet={type:'blog-assistant.naver-post',version:1,blogID:'bluedog129',categoryNo:'65',title:'식당 후기',blocks:[{kind:'text',text:'첫 문단'},{kind:'photo',photoNumber:1},{kind:'text',text:'메뉴 감상'}],photos:[{number:1,filename:'01_메뉴.jpg',caption:'메뉴'}]};
+const files=new Map([['01_메뉴.jpg',{size:1000}]]);
+assert.equal(validatePacket(packet,files),packet);
+for(const change of [{version:2},{blogID:'other'},{photos:[{number:1,filename:'../secret.jpg'}]},{blocks:[{kind:'photo',photoNumber:2}]},{blocks:[{kind:'text',text:'본문'}]}])assert.throws(()=>validatePacket({...packet,...change},files));
+assert.throws(()=>validatePacket(packet,new Map()));
+const state={title:packet.title,imageCount:1,components:[{kind:'text',text:'첫 문단'},{kind:'photo',text:''},{kind:'text',text:'메뉴 감상'}]};
+assert.doesNotThrow(()=>validateContent(state,packet));
+assert.throws(()=>validateContent({...state,title:'다른 제목'},packet));
+assert.throws(()=>validateContent({...state,imageCount:0},packet));
+assert.throws(()=>validateContent({...state,components:[state.components[1],state.components[0],state.components[2]]},packet));
+assert.throws(()=>validateContent({...state,components:[{kind:'text',text:'변경된 문단'},...state.components.slice(1)]},packet));
+console.log('Passed posting package validation, missing photo rejection and exact content/photo-order verification');

@@ -4,8 +4,8 @@ import ImageIO
 import UniformTypeIdentifiers
 
 @MainActor enum DraftPhotoExporter {
-    static func export(_ photos: [DraftPhoto], assets: [String: PHAsset], folder: URL) async throws -> URL {
-        guard !photos.isEmpty, photos.allSatisfy({ assets[$0.id] != nil }) else {
+    static func export(_ photos: [DraftPhoto], assets: [String: PHAsset], folder: URL, postText: String? = nil) async throws -> URL {
+        guard (postText != nil || !photos.isEmpty), photos.allSatisfy({ assets[$0.id] != nil }) else {
             throw failure("선택한 사진 중 사용할 수 없는 사진이 있습니다. 권한과 방문 구성을 확인하세요.")
         }
         let scoped = folder.startAccessingSecurityScopedResource()
@@ -14,6 +14,7 @@ import UniformTypeIdentifiers
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: false)
         do {
             var lines: [String] = []
+            var filenames: [String] = []
             for (index, photo) in photos.enumerated() {
                 try Task.checkCancellation()
                 let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
@@ -36,6 +37,13 @@ import UniformTypeIdentifiers
                 CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
                 guard CGImageDestinationFinalize(destination) else { throw failure("사진 파일을 저장하지 못했습니다.") }
                 lines.append("[사진 \(index + 1)] → \(name)")
+                filenames.append(name)
+            }
+            if let postText {
+                let packet = try NaverPostPacket.make(text: postText, photos: photos, filenames: filenames)
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+                try encoder.encode(packet).write(to: output.appendingPathComponent("naver-post.json"), options: .atomic)
             }
             try lines.joined(separator: "\n").write(to: output.appendingPathComponent("사진순서.txt"), atomically: true, encoding: .utf8)
             return output
