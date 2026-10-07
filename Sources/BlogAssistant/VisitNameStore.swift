@@ -13,6 +13,13 @@ final class VisitNameStore {
         return Set(identifiers.compactMap { saved[$0] }).sorted()
     }
 
+    func isComplete(for identifiers: [String]) -> Bool {
+        guard !identifiers.isEmpty else { return false }
+        let saved = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
+        let values = identifiers.compactMap { saved[$0] }
+        return values.count == identifiers.count && Set(values).count == 1
+    }
+
     func save(_ name: String, for identifiers: [String]) {
         var saved = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)

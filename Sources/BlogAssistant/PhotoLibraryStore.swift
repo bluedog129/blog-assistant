@@ -15,6 +15,7 @@ struct PhotoVisit: Identifiable {
     let start: Date?
     let end: Date?
     let locatedCount: Int
+    let isManual: Bool
     var hasLocation: Bool { locatedCount > 0 }
     var uncertainCount: Int { assets.count - locatedCount }
 }
@@ -27,6 +28,7 @@ final class PhotoLibraryStore: NSObject, ObservableObject, PHPhotoLibraryChangeO
     @Published private(set) var isRequesting = false
     @Published private(set) var nameRevision = 0
     private let visitNames = VisitNameStore()
+    private let visitGroups = VisitGroupStore()
     let imageManager = PHCachingImageManager()
     let photoLimit = 300
     private var observing = false
@@ -44,9 +46,81 @@ final class PhotoLibraryStore: NSObject, ObservableObject, PHPhotoLibraryChangeO
         return names.count == 1 ? names[0] : nil
     }
 
+    func isOrganized(_ visit: PhotoVisit) -> Bool {
+        visitNames.isComplete(for: visit.assets.map(\.localIdentifier))
+    }
+
     func saveRestaurantName(_ name: String, for visit: PhotoVisit) {
         visitNames.save(name, for: visit.assets.map(\.localIdentifier))
         nameRevision += 1
+    }
+
+    func otherVisits(onDayOf visitID: String) -> [PhotoVisit] {
+        days.first { $0.visits.contains { $0.id == visitID } }?.visits.filter { $0.id != visitID } ?? []
+    }
+
+    // Return the group to display after editing. All operations use fresh library state.
+    func split(visitID: String, photoIDs: Set<String>) -> String? {
+        guard canRead, !isLoading,
+              let day = days.first(where: { $0.visits.contains { $0.id == visitID } }),
+              let source = day.visits.first(where: { $0.id == visitID }) else { return nil }
+        let ids = Set(source.assets.map(\.localIdentifier))
+        guard !photoIDs.isEmpty, photoIDs.isSubset(of: ids), photoIDs.count < ids.count else { return nil }
+        let sourceID = source.isManual ? source.id : "manual-\(UUID().uuidString)"
+        visitGroups.assign(Array(ids.subtracting(photoIDs)), to: sourceID)
+        visitGroups.assign(Array(photoIDs), to: "manual-\(UUID().uuidString)")
+        rebuild(day)
+        return sourceID
+    }
+
+    func move(visitID: String, photoIDs: Set<String>, to targetID: String) -> String? {
+        guard canRead, !isLoading, visitID != targetID,
+              let day = days.first(where: { $0.visits.contains { $0.id == visitID } }),
+              let source = day.visits.first(where: { $0.id == visitID }),
+              let target = day.visits.first(where: { $0.id == targetID }) else { return nil }
+        let ids = Set(source.assets.map(\.localIdentifier))
+        guard !photoIDs.isEmpty, photoIDs.isSubset(of: ids) else { return nil }
+        let destination = target.isManual ? target.id : "manual-\(UUID().uuidString)"
+        let remaining = ids.subtracting(photoIDs)
+        if !remaining.isEmpty {
+            visitGroups.assign(Array(remaining), to: source.isManual ? source.id : "manual-\(UUID().uuidString)")
+        }
+        visitGroups.assign(target.assets.map(\.localIdentifier) + Array(photoIDs), to: destination)
+        rebuild(day)
+        return destination
+    }
+
+    func resetGrouping(for visitID: String) {
+        guard canRead, !isLoading,
+              let day = days.first(where: { $0.visits.contains { $0.id == visitID } }) else { return }
+        visitGroups.reset(day.visits.flatMap { $0.assets.map(\.localIdentifier) })
+        rebuild(day)
+    }
+
+    private func rebuild(_ day: PhotoDay) {
+        generation += 1
+        let updated = Self.makeDay(date: day.date, assets: day.visits.flatMap(\.assets), assignments: visitGroups.assignments)
+        days = days.map { $0.id == day.id ? updated : $0 }
+    }
+
+    nonisolated private static func makeDay(date: Date?, assets: [PHAsset], assignments: [String: String]) -> PhotoDay {
+        let byID = Dictionary(uniqueKeysWithValues: assets.map { ($0.localIdentifier, $0) })
+        let metadata = assets.map { VisitPhoto(id: $0.localIdentifier, date: $0.creationDate, location: $0.location) }
+        let automatic = VisitGrouping.groups(for: metadata)
+        let located = Set(automatic.flatMap { $0 }.filter { $0.location != nil }.map(\.id))
+        let visits = VisitGroupStore.apply(to: automatic.map { $0.map(\.id) }, assignments: assignments).map { group in
+            let sorted = group.photoIDs.compactMap { byID[$0] }.sorted {
+                if $0.creationDate == $1.creationDate { return $0.localIdentifier < $1.localIdentifier }
+                return ($0.creationDate ?? .distantPast) < ($1.creationDate ?? .distantPast)
+            }
+            return PhotoVisit(id: group.id, assets: sorted, start: sorted.first?.creationDate,
+                              end: sorted.last?.creationDate, locatedCount: group.photoIDs.filter { located.contains($0) }.count,
+                              isManual: group.isManual)
+        }.sorted {
+            if $0.start == $1.start { return $0.id < $1.id }
+            return ($0.start ?? .distantPast) > ($1.start ?? .distantPast)
+        }
+        return PhotoDay(date: date, visits: visits)
     }
 
     func requestAccess() async {
@@ -73,6 +147,7 @@ final class PhotoLibraryStore: NSObject, ObservableObject, PHPhotoLibraryChangeO
         }
         isLoading = true
         let limit = photoLimit
+        let assignments = visitGroups.assignments
         DispatchQueue.global(qos: .userInitiated).async {
             let options = PHFetchOptions()
             options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
@@ -88,18 +163,8 @@ final class PhotoLibraryStore: NSObject, ObservableObject, PHPhotoLibraryChangeO
                     unknown.append(asset)
                 }
             }
-            func makeDay(date: Date?, assets: [PHAsset]) -> PhotoDay {
-                let byID = Dictionary(uniqueKeysWithValues: assets.map { ($0.localIdentifier, $0) })
-                let metadata = assets.map { VisitPhoto(id: $0.localIdentifier, date: $0.creationDate, location: $0.location) }
-                let visits = VisitGrouping.groups(for: metadata).map { photos in
-                    PhotoVisit(id: photos[0].id, assets: photos.compactMap { byID[$0.id] },
-                               start: photos.first?.date, end: photos.last?.date,
-                               locatedCount: photos.filter { $0.location != nil }.count)
-                }
-                return PhotoDay(date: date, visits: visits.reversed())
-            }
-            var sections = grouped.keys.sorted(by: >).map { makeDay(date: $0, assets: grouped[$0]!) }
-            if !unknown.isEmpty { sections.append(makeDay(date: nil, assets: unknown)) }
+            var sections = grouped.keys.sorted(by: >).map { Self.makeDay(date: $0, assets: grouped[$0]!, assignments: assignments) }
+            if !unknown.isEmpty { sections.append(Self.makeDay(date: nil, assets: unknown, assignments: assignments)) }
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.generation == currentGeneration else { return }
                 self.days = sections

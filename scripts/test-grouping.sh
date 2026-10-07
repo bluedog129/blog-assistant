@@ -6,3 +6,5 @@ swiftc Sources/BlogAssistant/VisitGrouping.swift Tests/BlogAssistantTests/VisitG
 .build/grouping-check/tests
 swiftc Sources/BlogAssistant/VisitNameStore.swift Tests/VisitNameStoreChecks.swift -o .build/grouping-check/name-tests
 .build/grouping-check/name-tests
+swiftc Sources/BlogAssistant/VisitGroupStore.swift Tests/VisitGroupStoreChecks.swift -o .build/grouping-check/group-tests
+.build/grouping-check/group-tests

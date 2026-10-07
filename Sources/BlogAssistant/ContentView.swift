@@ -2,11 +2,41 @@ import AppKit
 import Photos
 import SwiftUI
 
+private enum VisitFilter: String, CaseIterable {
+    case pending = "미정리"
+    case organized = "정리 완료"
+    case all = "전체"
+}
+
 struct ContentView: View {
     @ObservedObject var library: PhotoLibraryStore
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedVisit: PhotoVisit?
+    @State private var visitFilter: VisitFilter = .pending
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 230), spacing: 16)]
+
+    private var visibleDays: [PhotoDay] {
+        library.days.compactMap { day in
+            let visits = day.visits.filter { visit in
+                switch visitFilter {
+                case .pending: return !library.isOrganized(visit)
+                case .organized: return library.isOrganized(visit)
+                case .all: return true
+                }
+            }
+            return visits.isEmpty ? nil : PhotoDay(date: day.date, visits: visits)
+        }
+    }
+
+    private func visitCount(for filter: VisitFilter) -> Int {
+        library.days.flatMap(\.visits).filter { visit in
+            switch filter {
+            case .pending: return !library.isOrganized(visit)
+            case .organized: return library.isOrganized(visit)
+            case .all: return true
+            }
+        }.count
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -41,8 +71,13 @@ struct ContentView: View {
 
     private var photoGrid: some View {
         VStack(alignment: .leading, spacing: 0) {
+            Picker("방문 정리 상태", selection: $visitFilter) {
+                ForEach(VisitFilter.allCases, id: \.self) { filter in
+                    Text("\(filter.rawValue) (\(visitCount(for: filter)))").tag(filter)
+                }
+            }.pickerStyle(.segmented).padding(.horizontal, 24).padding(.top, 16)
             HStack {
-                Text("최근 사진 · \(library.count)장")
+                Text("\(visitFilter.rawValue) · \(visibleDays.reduce(0) { $0 + $1.count })장")
                 Spacer()
                 Text("촬영일 최신순 · 최대 \(library.photoLimit)장")
             }.font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, 24).padding(.vertical, 16)
@@ -56,10 +91,14 @@ struct ContentView: View {
                 Spacer()
             } else if library.days.isEmpty {
                 message(icon: "photo.on.rectangle", title: "표시할 사진이 없습니다", detail: "시스템 사진 보관함에 사진을 추가한 후 새로고침하세요.")
+            } else if visibleDays.isEmpty {
+                message(icon: visitFilter == .pending ? "checkmark.circle" : "tray",
+                        title: visitFilter == .pending ? "모든 방문의 정리가 완료됐습니다" : "정리 완료된 방문이 없습니다",
+                        detail: visitFilter == .pending ? "정리 완료 목록에서 음식점명을 저장한 방문을 확인하세요." : "미정리 방문의 상세 화면에서 음식점명을 저장하세요.")
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
-                        ForEach(library.days) { day in
+                        ForEach(visibleDays) { day in
                             Section {
                                 ForEach(Array(day.visits.enumerated()), id: \.element.id) { index, visit in
                                     VStack(alignment: .leading, spacing: 12) {
@@ -97,6 +136,10 @@ struct ContentView: View {
                     .font(.headline)
                 Spacer()
                 Text("\(visit.assets.count)장").foregroundStyle(.secondary)
+                if library.isOrganized(visit) {
+                    Label("정리 완료", systemImage: "checkmark.circle.fill")
+                        .font(.caption).foregroundStyle(.green)
+                }
                 Button("상세 보기") { selectedVisit = visit }
             }
             if let start = visit.start, let end = visit.end {
@@ -110,6 +153,9 @@ struct ContentView: View {
             if library.savedNames(for: visit).count > 1 {
                 Text("저장된 음식점명이 여러 개입니다. 상세 화면에서 확인하세요.")
                     .font(.caption).foregroundStyle(.orange)
+            }
+            if visit.isManual {
+                Label("직접 수정한 방문", systemImage: "hand.draw").font(.caption).foregroundStyle(.secondary)
             }
         }
     }
