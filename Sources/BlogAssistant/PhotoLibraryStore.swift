@@ -29,6 +29,8 @@ final class PhotoLibraryStore: NSObject, ObservableObject, PHPhotoLibraryChangeO
     @Published private(set) var nameRevision = 0
     private let visitNames = VisitNameStore()
     private let visitGroups = VisitGroupStore()
+    private let reviews = ReviewStore()
+    @Published private(set) var reviewRevision = 0
     let imageManager = PHCachingImageManager()
     let photoLimit = 300
     private var observing = false
@@ -48,6 +50,30 @@ final class PhotoLibraryStore: NSObject, ObservableObject, PHPhotoLibraryChangeO
 
     func isOrganized(_ visit: PhotoVisit) -> Bool {
         visitNames.isComplete(for: visit.assets.map(\.localIdentifier))
+    }
+
+    func savedReviews(for visit: PhotoVisit) throws -> [VisitReview] {
+        try reviews.matches(photoIDs: visit.assets.map(\.localIdentifier))
+    }
+
+    func reviewStatus(for visit: PhotoVisit) -> String {
+        guard let saved = try? savedReviews(for: visit) else { return "후기 정보 읽기 실패" }
+        guard !saved.isEmpty else { return "후기 정보 미입력" }
+        guard saved.count == 1, let record = saved.first,
+              Set(record.photoIDs) == Set(visit.assets.map(\.localIdentifier)),
+              record.restaurantName == restaurantName(for: visit) else { return "입력 중 · 방문 정보 확인 필요" }
+        return record.isReady && isOrganized(visit) ? "초안 생성 가능" : "입력 중"
+    }
+
+    func saveReview(_ review: VisitReview, for visitID: String) throws {
+        guard canRead, isLoading == false,
+              let current = days.flatMap(\.visits).first(where: { $0.id == visitID }), isOrganized(current),
+              Set(current.assets.map(\.localIdentifier)) == Set(review.photoIDs),
+              restaurantName(for: current) == review.restaurantName else {
+            throw NSError(domain: "Review", code: 1, userInfo: [NSLocalizedDescriptionKey: "방문 사진 또는 음식점명이 변경됐습니다. 목록에서 방문을 다시 확인하세요."])
+        }
+        try reviews.save(review)
+        reviewRevision += 1
     }
 
     func saveRestaurantName(_ name: String, for visit: PhotoVisit) {

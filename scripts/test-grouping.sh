@@ -8,3 +8,5 @@ swiftc Sources/BlogAssistant/VisitNameStore.swift Tests/VisitNameStoreChecks.swi
 .build/grouping-check/name-tests
 swiftc Sources/BlogAssistant/VisitGroupStore.swift Tests/VisitGroupStoreChecks.swift -o .build/grouping-check/group-tests
 .build/grouping-check/group-tests
+swiftc Sources/BlogAssistant/ReviewStore.swift Tests/ReviewStoreChecks.swift -o .build/grouping-check/review-tests
+.build/grouping-check/review-tests

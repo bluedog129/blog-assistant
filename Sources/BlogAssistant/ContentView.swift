@@ -12,6 +12,7 @@ struct ContentView: View {
     @ObservedObject var library: PhotoLibraryStore
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedVisit: PhotoVisit?
+    @State private var preparationVisit: PhotoVisit?
     @State private var visitFilter: VisitFilter = .pending
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 230), spacing: 16)]
 
@@ -64,6 +65,9 @@ struct ContentView: View {
         .sheet(item: $selectedVisit) { visit in
             VisitDetailView(visitID: visit.id, library: library)
         }
+        .sheet(item: $preparationVisit) { visit in
+            ReviewPreparationView(visitID: visit.id, library: library)
+        }
         .onChange(of: scenePhase) { phase in
             if phase == .active { library.refresh() }
         }
@@ -106,12 +110,12 @@ struct ContentView: View {
                                         LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
                                             ForEach(visit.assets, id: \.localIdentifier) { asset in
                                                 PhotoThumbnail(asset: asset, manager: library.imageManager)
+                                                    .onTapGesture { selectedVisit = visit }
                                             }
                                         }
                                     }.padding(16)
                                         .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
                                         .contentShape(Rectangle())
-                                        .onTapGesture { selectedVisit = visit }
                                 }
                             } header: {
                                 HStack {
@@ -156,6 +160,14 @@ struct ContentView: View {
             }
             if visit.isManual {
                 Label("직접 수정한 방문", systemImage: "hand.draw").font(.caption).foregroundStyle(.secondary)
+            }
+            if library.isOrganized(visit) {
+                HStack {
+                    Text(library.reviewStatus(for: visit)).font(.subheadline).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("후기 작성 준비") { preparationVisit = visit }
+                        .buttonStyle(.borderedProminent)
+                }
             }
         }
     }
