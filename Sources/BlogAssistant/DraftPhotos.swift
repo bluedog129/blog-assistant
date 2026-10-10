@@ -3,6 +3,7 @@ import Foundation
 struct DraftPhoto: Codable, Equatable, Identifiable {
     let id: String
     var caption: String = ""
+    var previousVisitDate: Date?
 }
 
 struct DraftPhotoPlan: Codable {
@@ -10,6 +11,25 @@ struct DraftPhotoPlan: Codable {
     var requestPhotos: [DraftPhoto]?
     var requestReview: VisitReview?
     var referencePostIDs: [String]?
+    var visitPhotosSnapshot: [DraftPhoto]?
+
+    // Keep requestPhotos frozen; manual caption edits and exclusions survive a reopen.
+    mutating func syncVisitPhotos(_ photos: [DraftPhoto]) {
+        let previous = visitPhotosSnapshot ?? []
+        let currentIDs = Set(photos.map(\.id))
+        let removedIDs = Set(previous.map(\.id)).subtracting(currentIDs)
+        selected.removeAll { removedIDs.contains($0.id) }
+        for photo in photos {
+            if let index = selected.firstIndex(where: { $0.id == photo.id }) {
+                if let old = previous.first(where: { $0.id == photo.id }), selected[index] == old {
+                    selected[index] = photo
+                }
+            } else if !previous.contains(where: { $0.id == photo.id }) {
+                selected.append(photo)
+            }
+        }
+        visitPhotosSnapshot = photos
+    }
 }
 
 final class DraftPhotoPlanStore {

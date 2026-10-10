@@ -4,6 +4,10 @@ cd "$(dirname "$0")/.."
 mkdir -p .build/grouping-check
 swiftc Sources/BlogAssistant/VisitGrouping.swift Tests/BlogAssistantTests/VisitGroupingTests.swift -o .build/grouping-check/tests
 .build/grouping-check/tests
+swiftc Sources/BlogAssistant/LocationPhotoSearch.swift Tests/LocationPhotoSearchChecks.swift -o .build/grouping-check/location-search-tests
+.build/grouping-check/location-search-tests
+swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/VisitPhotoSelectionStore.swift Tests/VisitPhotoSelectionChecks.swift -o .build/grouping-check/visit-photo-tests
+.build/grouping-check/visit-photo-tests
 swiftc Sources/BlogAssistant/VisitNameStore.swift Tests/VisitNameStoreChecks.swift -o .build/grouping-check/name-tests
 .build/grouping-check/name-tests
 swiftc Sources/BlogAssistant/VisitGroupStore.swift Tests/VisitGroupStoreChecks.swift -o .build/grouping-check/group-tests

@@ -26,9 +26,9 @@ enum DraftPrompt {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let factsText = String(decoding: try encoder.encode(facts), as: UTF8.self)
         let styleText = String(decoding: try encoder.encode((references?.articles ?? []).map { Style(title: $0.title, body: $0.body) }), as: UTF8.self)
-        struct Photo: Encodable { let number: Int; let description: String }
+        struct Photo: Encodable { let number: Int; let description: String; let previousVisitDate: String? }
         let photoText = String(decoding: try encoder.encode(photos.enumerated().map {
-            Photo(number: $0.offset + 1, description: $0.element.caption.isEmpty ? "설명 없음 · 사진 내용을 단정하지 말 것" : $0.element.caption)
+            Photo(number: $0.offset + 1, description: $0.element.caption.isEmpty ? "설명 없음 · 사진 내용을 단정하지 말 것" : $0.element.caption, previousVisitDate: $0.element.previousVisitDate.map { formatter.string(from: $0) })
         }), as: UTF8.self)
         return """
         네이버 맛집 블로그의 한국어 초안을 작성하세요.
@@ -41,6 +41,7 @@ enum DraftPrompt {
         - 주소, 영업시간, 서비스, 맛, 분위기, 추천 이유 등 입력되지 않은 사실이나 감상을 지어내지 마세요.
         - visitBackground가 있으면 입력한 방문 계기를 도입부에 자연스럽게 반영하세요. 없으면 방문 계기를 생략하세요. 모임의 성격·동행인·초대·협찬 여부 등 입력되지 않은 배경을 덧붙이지 마세요.
         - 메뉴 감상을 자연스럽게 풀되 원래 의미와 긍정·부정의 정도를 유지하세요.
+        - 사진의 previousVisitDate가 있으면 이번 방문과 다른 날짜에 촬영한 사진입니다. 본문의 해당 사진 근처에 실제 촬영일을 표시하고, 사진 설명을 이번 방문에 먹은 메뉴·가격·감상의 근거로 사용하지 마세요.
         - 실제 사진 파일은 제공되지 않습니다. 사진 목록의 설명만 참고하고 사진 내용을 단정하지 마세요.
         - 사진 목록의 순서를 유지하고 각 사진을 정확히 한 번씩 배치하세요. 표시를 별도 줄에 [사진 1], [사진 2] 형식으로 넣으세요. 대괄호 안에 설명을 덧붙이지 마세요.
         - 메뉴의 photoNumbers는 해당 메뉴에 연결된 사진 번호입니다. 메뉴 설명 근처에 연결된 사진들을 배치하되 사진 목록의 순서를 유지하세요.

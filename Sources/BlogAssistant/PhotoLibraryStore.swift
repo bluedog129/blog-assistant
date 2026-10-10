@@ -2,6 +2,12 @@ import AppKit
 import Photos
 import SwiftUI
 
+struct NearbyPhoto: Identifiable {
+    let asset: PHAsset
+    let distance: Double
+    var id: String { asset.localIdentifier }
+}
+
 struct PhotoDay: Identifiable {
     let date: Date?
     let visits: [PhotoVisit]
@@ -24,6 +30,7 @@ struct PhotoVisit: Identifiable {
 final class PhotoLibraryStore: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     @Published private(set) var authorization = PHPhotoLibrary.authorizationStatus(for: .readWrite)
     @Published private(set) var days: [PhotoDay] = []
+    @Published private(set) var photoRevision = 0
     @Published private(set) var isLoading = false
     @Published private(set) var isRequesting = false
     @Published private(set) var nameRevision = 0
@@ -50,6 +57,63 @@ final class PhotoLibraryStore: NSObject, ObservableObject, PHPhotoLibraryChangeO
 
     func isOrganized(_ visit: PhotoVisit) -> Bool {
         visitNames.isComplete(for: visit.assets.map(\.localIdentifier))
+    }
+
+    // Fetch saved identifiers directly, including photos outside the recent-300 list.
+    func assets(for identifiers: [String]) -> [PHAsset] {
+        guard canRead, !identifiers.isEmpty else { return [] }
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: Array(Set(identifiers)), options: nil)
+        var assets: [PHAsset] = []
+        result.enumerateObjects { asset, _, _ in
+            if asset.mediaType == .image { assets.append(asset) }
+        }
+        return assets
+    }
+
+    func nearbyPhotos(photoIDs: [String], referenceID: String, radius: Double) async throws -> [NearbyPhoto] {
+        guard canRead else { throw photoSearchFailure("사진 보관함 접근 권한이 필요합니다.") }
+        let currentAssets = assets(for: photoIDs)
+        guard let reference = currentAssets.first(where: { $0.localIdentifier == referenceID }),
+              let anchor = reference.location, LocationPhotoSearch.isValid(anchor) else {
+            throw photoSearchFailure("이번 방문에 유효한 GPS가 있는 사진을 검색 기준으로 선택하세요.")
+        }
+        let calendar = Calendar.current
+        let dates = currentAssets.compactMap(\.creationDate)
+        guard !dates.isEmpty else { throw photoSearchFailure("이번 방문의 날짜를 먼저 확인하세요.") }
+        let query = LocationPhotoSearch(anchor: anchor, radius: radius,
+                                       excludedIDs: Set(photoIDs),
+                                       excludedDays: Set(dates.map { calendar.startOfDay(for: $0) }), calendar: calendar)
+        let search = Task.detached(priority: .userInitiated) { () throws -> [NearbyPhoto] in
+            try Task.checkCancellation()
+            let options = PHFetchOptions()
+            // No fetch limit: search metadata throughout the accessible image library.
+            let result = PHAsset.fetchAssets(with: .image, options: options)
+            var matches: [NearbyPhoto] = []
+            result.enumerateObjects { asset, _, stop in
+                if Task.isCancelled { stop.pointee = true; return }
+                if let distance = query.distance(id: asset.localIdentifier, date: asset.creationDate, location: asset.location) {
+                    matches.append(NearbyPhoto(asset: asset, distance: distance))
+                }
+            }
+            try Task.checkCancellation()
+            return matches.sorted {
+                if $0.asset.creationDate == $1.asset.creationDate {
+                    if $0.distance == $1.distance { return $0.id < $1.id }
+                    return $0.distance < $1.distance
+                }
+                return ($0.asset.creationDate ?? .distantPast) > ($1.asset.creationDate ?? .distantPast)
+            }
+        }
+        let matches = try await withTaskCancellationHandler(operation: {
+            try await search.value
+        }, onCancel: { search.cancel() })
+        try Task.checkCancellation()
+        guard canRead else { throw photoSearchFailure("사진 보관함 접근 권한이 필요합니다.") }
+        return matches
+    }
+
+    private func photoSearchFailure(_ message: String) -> NSError {
+        NSError(domain: "LocationPhotoSearch", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }
 
     func savedReviews(for visit: PhotoVisit) throws -> [VisitReview] {
@@ -158,6 +222,7 @@ final class PhotoLibraryStore: NSObject, ObservableObject, PHPhotoLibraryChangeO
     }
 
     func refresh() {
+        photoRevision += 1
         authorization = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         generation += 1
         let currentGeneration = generation

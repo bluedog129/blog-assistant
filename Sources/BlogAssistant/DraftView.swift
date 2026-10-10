@@ -28,17 +28,22 @@ struct DraftView: View {
     @State private var chromeConnectionVisible = false
     private var dirty: Bool { text != baseline || photoConnectionChanged }
     private var assets: [PHAsset] {
-        guard library.canRead else { return [] }
-        let ids = Set(review.photoIDs)
-        return library.days.flatMap(\.visits).flatMap(\.assets).filter { ids.contains($0.localIdentifier) }
-            .sorted { ($0.creationDate ?? .distantPast) < ($1.creationDate ?? .distantPast) }
+        library.assets(for: review.photoIDs).sorted {
+            if $0.creationDate == $1.creationDate { return $0.localIdentifier < $1.localIdentifier }
+            return ($0.creationDate ?? .distantPast) < ($1.creationDate ?? .distantPast)
+        }
     }
-    private var assetMap: [String: PHAsset] { Dictionary(assets.map { ($0.localIdentifier, $0) }, uniquingKeysWith: { first, _ in first }) }
+    private var assetMap: [String: PHAsset] {
+        let storedIDs = plan.selected.map(\.id) + displayPhotos.map(\.id) + (pendingPhoto.map { [$0.id] } ?? [])
+        let fetched = library.assets(for: review.photoIDs + storedIDs)
+        return Dictionary(fetched.map { ($0.localIdentifier, $0) }, uniquingKeysWith: { first, _ in first })
+    }
     private var displayPhotos: [DraftPhoto] { draft?.photos ?? plan.requestPhotos ?? plan.selected }
     private var prompt: String { (try? DraftPrompt.make(review: review, references: includeReferences ? references : nil, photos: plan.selected)) ?? "" }
     private var canCopyRequest: Bool {
-        loaded && !loadFailed && review.isReady && (!includeReferences || referenceError == nil) &&
-        plan.selected.allSatisfy { assetMap[$0.id] != nil && !$0.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let mapping = assetMap
+        return loaded && !loadFailed && review.isReady && (!includeReferences || referenceError == nil) &&
+        plan.selected.allSatisfy { mapping[$0.id] != nil && !$0.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     var body: some View {
@@ -128,13 +133,13 @@ struct DraftView: View {
         .sheet(isPresented: $chromeConnectionVisible) { ChromeConnectionView() }
         .sheet(item: $pendingPhoto) { photo in
             if let asset = assetMap[photo.id] {
-                PhotoCaptionEntry(asset: asset, manager: library.imageManager) { caption in
+                PhotoCaptionEntry(asset: asset, manager: library.imageManager, previousVisitDate: photo.previousVisitDate) { caption in
                     guard library.canRead, assetMap[photo.id] != nil,
                           !plan.selected.contains(where: { $0.id == photo.id }) else {
                         message = "사진을 추가할 수 없습니다. 사진 권한과 방문 구성을 확인하세요."
                         return
                     }
-                    plan.selected.append(DraftPhoto(id: photo.id, caption: caption))
+                    plan.selected.append(DraftPhoto(id: photo.id, caption: caption, previousVisitDate: photo.previousVisitDate))
                     persistPlan()
                 }
             } else {
@@ -159,7 +164,8 @@ struct DraftView: View {
     }
 
     private var photoPreparation: some View {
-        ScrollView {
+        let mapping = assetMap
+        return ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
                 Text("① 사진 선택 · \(plan.selected.count)장").font(.headline)
                 Text("메뉴에 연결한 사진은 메뉴명이 자동 입력됩니다. 전경·반찬 등 다른 사진은 설명을 입력해 추가하세요. 선택 순서가 사진 번호입니다.").font(.caption).foregroundStyle(.secondary)
@@ -177,8 +183,12 @@ struct DraftView: View {
                                 Button("↓") { movePhoto(index, by: 1) }.disabled(index == plan.selected.count - 1).accessibilityLabel("사진 아래로 이동")
                                 Button("제외") { plan.selected.removeAll { $0.id == photo.id }; persistPlan() }
                             }
-                            if let asset = assetMap[photo.id] { PhotoThumbnail(asset: asset, manager: library.imageManager).frame(maxWidth: 210) }
+                            if let asset = mapping[photo.id] { PhotoThumbnail(asset: asset, manager: library.imageManager).frame(maxWidth: 210) }
                             else { Text("사진을 사용할 수 없습니다. 권한 또는 방문 구성을 확인하세요.").font(.caption).foregroundStyle(.orange) }
+                            if let date = photo.previousVisitDate {
+                                Text("다른 날짜 · \(date.formatted(date: .numeric, time: .omitted))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                             TextField("사진 설명 (예: 돈코츠 라멘)", text: Binding(
                                 get: { plan.selected.first { $0.id == photo.id }?.caption ?? "" },
                                 set: { value in
@@ -196,20 +206,27 @@ struct DraftView: View {
                         Button("추가") { pendingPhoto = DraftPhoto(id: asset.localIdentifier) }
                     }.disabled(!loaded || loadFailed || exporting)
                 }
+                Divider()
+                Text("다른 날짜 사진은 방문 상세의 GPS 검색에서 선택할 수 있습니다. 선택한 사진은 초안에 이어집니다.").font(.caption).foregroundStyle(.secondary)
             }.padding(.trailing, 12)
         }
     }
     private var draftPreview: some View {
-        ScrollView {
+        let mapping = assetMap
+        return ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 ForEach(DraftLayout.blocks(text)) { block in
                     if let content = block.text { Text(content).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                     if let number = block.photoNumber {
                         if number > 0, number <= displayPhotos.count {
                             let photo = displayPhotos[number - 1]
-                            if let asset = assetMap[photo.id] {
+                            if let asset = mapping[photo.id] {
                                 PhotoThumbnail(asset: asset, manager: library.imageManager, showFullImage: true).frame(maxWidth: 420)
                                 Text("사진 \(number) · \(photo.caption)").font(.caption).foregroundStyle(.secondary)
+                                if let date = photo.previousVisitDate {
+                                    Text("다른 날짜 · \(date.formatted(date: .numeric, time: .omitted))")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
                             } else { Text("[사진 \(number)] 사진을 사용할 수 없습니다.").foregroundStyle(.orange) }
                         } else { Text("[사진 \(number)] 연결할 사진이 없습니다.").foregroundStyle(.orange) }
                     }
@@ -222,10 +239,10 @@ struct DraftView: View {
         do {
             draft = try DraftStore().latest(reviewID: review.id)
             plan = try DraftPhotoPlanStore().load(reviewID: review.id)
-            if draft == nil && plan.selected.isEmpty && plan.requestPhotos == nil {
-                addMenuPhotos()
-                try DraftPhotoPlanStore().save(plan, reviewID: review.id)
-            }
+            if draft == nil && plan.selected.isEmpty && plan.requestPhotos == nil { addMenuPhotos() }
+            let visitPhotos = try VisitPhotoSelectionStore().load(sourcePhotoIDs: review.photoIDs)
+            plan.syncVisitPhotos(visitPhotos)
+            try DraftPhotoPlanStore().save(plan, reviewID: review.id)
             text = draft?.text ?? ""; baseline = text
         } catch { loadFailed = true; message = "기존 초안 또는 사진 구성을 읽지 못했습니다. 기존 자료 보호를 위해 저장·가져오기를 중단했습니다." }
         do { references = try ReferenceStore().load() }

@@ -4,6 +4,7 @@ import SwiftUI
 struct PhotoCaptionEntry: View {
     let asset: PHAsset
     let manager: PHCachingImageManager
+    var previousVisitDate: Date? = nil
     let onAdd: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var caption = ""
@@ -14,6 +15,10 @@ struct PhotoCaptionEntry: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("어떤 사진인가요?").font(.title2.bold())
+            if let date = previousVisitDate {
+                Text("다른 날짜 사진 · \(date.formatted(date: .numeric, time: .omitted))")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
             PhotoThumbnail(asset: asset, manager: manager, showFullImage: true)
                 .frame(maxWidth: 360, maxHeight: 330)
             TextField("예: 가게 전경, 돈코츠 라멘, 기본 반찬", text: $caption)

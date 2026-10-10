@@ -12,6 +12,8 @@ struct VisitDetailView: View {
     @State private var selectedPhotos: Set<String> = []
     @State private var destinationID = ""
     @State private var resetConfirmation = false
+    @State private var locationSearchVisible = false
+    @State private var additionalPhotoCount = 0
     @State private var operationError: String?
     private var nameDirty: Bool { name.trimmingCharacters(in: .whitespacesAndNewlines) != originalName }
 
@@ -48,8 +50,17 @@ struct VisitDetailView: View {
                     Text("이 후보에 저장된 이름: \(library.savedNames(for: visit).joined(separator: ", ")). 이름을 저장하면 이 후보의 사진에 동일하게 적용됩니다.")
                         .font(.caption).foregroundStyle(.orange)
                 }
-                Text("\(visit.assets.count)장 · 위치 불확실 \(visit.uncertainCount)장")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                HStack {
+                    Text("\(visit.assets.count)장 · 위치 불확실 \(visit.uncertainCount)장")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("같은 위치의 다른 날짜 사진 찾기") { locationSearchVisible = true }
+                        .disabled(library.isLoading)
+                }
+                if additionalPhotoCount > 0 {
+                    Text("다른 날짜 사진 \(additionalPhotoCount)장 선택됨 · 블로그 초안에 이어집니다.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 groupControls(visit)
                 if let operationError {
                     Text(operationError).font(.caption).foregroundStyle(.red)
@@ -83,6 +94,12 @@ struct VisitDetailView: View {
             name = originalName
             initialized = true
         }
+        .task(id: visit?.assets.map(\.localIdentifier)) { loadAdditionalPhotoCount() }
+        .sheet(isPresented: $locationSearchVisible, onDismiss: { loadAdditionalPhotoCount() }) {
+            if let visit {
+                VisitLocationPhotosView(sourcePhotoIDs: visit.assets.map(\.localIdentifier), library: library)
+            }
+        }
         .interactiveDismissDisabled(name.trimmingCharacters(in: .whitespacesAndNewlines) != originalName)
         .confirmationDialog("저장하지 않은 음식점명 변경을 버릴까요?", isPresented: $confirmDiscard, titleVisibility: .visible) {
             Button("변경 버리고 닫기", role: .destructive) { dismiss() }
@@ -100,6 +117,12 @@ struct VisitDetailView: View {
         .onChange(of: library.days.flatMap(\.visits).flatMap { $0.assets.map(\.localIdentifier) }) { _ in
             selectedPhotos.formIntersection(Set(visit?.assets.map(\.localIdentifier) ?? []))
         }
+    }
+
+    private func loadAdditionalPhotoCount() {
+        guard let visit else { additionalPhotoCount = 0; return }
+        do { additionalPhotoCount = try VisitPhotoSelectionStore().load(sourcePhotoIDs: visit.assets.map(\.localIdentifier)).count }
+        catch { operationError = "추가 사진 기록을 읽지 못했습니다. 기존 자료는 유지됩니다." }
     }
 
     private func groupControls(_ visit: PhotoVisit) -> some View {
