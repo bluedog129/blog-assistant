@@ -76,6 +76,11 @@ struct ReviewPreparationView: View {
                                     }
                                     Spacer()
                                 }
+                                Text("방문 계기 (선택)").font(.headline)
+                                Text("예: 문토 모임으로 방문했어요 / 친구 추천으로 방문했어요. 입력한 내용은 초안 도입부에 반영됩니다.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                TextEditor(text: $review.visitBackground).frame(minHeight: 65)
+                                    .border(Color.secondary.opacity(0.25)).accessibilityLabel("방문 계기")
                                 Button { searchRestaurant() } label: { Label("네이버에서 검색", systemImage: "magnifyingglass") }
                                 Text("영업정보 (선택)").font(.headline)
                                 Text("영업시간·브레이크타임·휴무·라스트오더 등을 찾아 한 번에 붙여넣으세요.")

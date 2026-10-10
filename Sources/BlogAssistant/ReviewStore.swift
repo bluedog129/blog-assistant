@@ -30,7 +30,26 @@ struct VisitReview: Codable, Identifiable, Equatable {
     var visitDate: Date?
     var businessInfo = ""
     var waitingNote = ""
+    var visitBackground = ""
     var menus: [ReviewMenu] = []
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case id, photoIDs, restaurantName, visitDate, businessInfo, waitingNote, visitBackground, menus
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        photoIDs = try values.decode([String].self, forKey: .photoIDs)
+        restaurantName = try values.decode(String.self, forKey: .restaurantName)
+        visitDate = try values.decodeIfPresent(Date.self, forKey: .visitDate)
+        businessInfo = try values.decode(String.self, forKey: .businessInfo)
+        waitingNote = try values.decode(String.self, forKey: .waitingNote)
+        visitBackground = try values.decodeIfPresent(String.self, forKey: .visitBackground) ?? ""
+        menus = try values.decode([ReviewMenu].self, forKey: .menus)
+    }
 
     var isReady: Bool {
         !restaurantName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && visitDate != nil &&

@@ -14,6 +14,11 @@ struct ReviewStoreChecks {
         first.businessInfo = "월–금 11:00–21:00\n브레이크타임 15:00–17:00"
         first.menus = [ReviewMenu(name: "안심 돈카츠", price: "18,000원", impression: "소금에 찍어 먹었을 때 부드러웠음")]
         precondition(first.isReady)
+        var legacyObject = try JSONSerialization.jsonObject(with: JSONEncoder().encode(first)) as! [String: Any]
+        legacyObject.removeValue(forKey: "visitBackground")
+        let legacy = try JSONDecoder().decode(VisitReview.self, from: JSONSerialization.data(withJSONObject: legacyObject))
+        precondition(legacy == first && legacy.visitBackground.isEmpty && legacy.isReady)
+        first.visitBackground = "문토 모임으로 방문했어요"
         try store.save(first)
         let reopened = ReviewStore(defaults: UserDefaults(suiteName: suite)!)
         let restored = try reopened.matches(photoIDs: ["a", "b"])

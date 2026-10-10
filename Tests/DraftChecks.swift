@@ -28,6 +28,15 @@ import Foundation
         let prompt = try DraftPrompt.make(review: review, references: reference)
         precondition(prompt.contains("테스트 식당") && prompt.contains("담백했어요") && prompt.contains("문체 예시"))
         precondition(!prompt.contains("private-photo-id") && !prompt.contains("https://blog.naver.com"))
+        precondition(!prompt.contains("\"visitBackground\""))
+        var withBackground = review
+        withBackground.visitBackground = "문토 모임으로 방문했어요"
+        let backgroundPrompt = try DraftPrompt.make(review: withBackground, references: nil)
+        precondition(backgroundPrompt.contains("문토 모임으로 방문했어요"))
+        precondition(backgroundPrompt.contains("\"visitBackground\""))
+        withBackground.visitBackground = "  \n "
+        let blankBackgroundPrompt = try DraftPrompt.make(review: withBackground, references: nil)
+        precondition(!blankBackgroundPrompt.contains("\"visitBackground\""))
         var incomplete = review; incomplete.menus = []
         do { _ = try DraftPrompt.make(review: incomplete, references: nil); fatalError("Accepted incomplete facts") } catch {}
         let generated = "제목\n\n[사진 1]\n\n본문"
