@@ -71,3 +71,23 @@ enum DraftLayout {
         return result
     }
 }
+
+// A shared photo is included once, with all linked menu names in its caption.
+enum MenuDraftPhotos {
+    static func make(review: VisitReview) -> [DraftPhoto] {
+        let available = Set(review.photoIDs)
+        var result: [DraftPhoto] = []
+        for menu in review.menus {
+            let name = menu.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+            for id in menu.photoIDs where available.contains(id) {
+                if let index = result.firstIndex(where: { $0.id == id }) {
+                    if !result[index].caption.components(separatedBy: " · ").contains(name) {
+                        result[index].caption += " · " + name
+                    }
+                } else { result.append(DraftPhoto(id: id, caption: name)) }
+            }
+        }
+        return result
+    }
+}

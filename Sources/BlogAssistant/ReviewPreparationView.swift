@@ -106,6 +106,7 @@ struct ReviewPreparationView: View {
                                             }
                                         }
                                         TextField("가격 (선택, 예: 18,000원)", text: $menu.price).textFieldStyle(.roundedBorder)
+                                        menuPhotos(menuID: menu.id)
                                         Text("이 메뉴에 대한 실제 감상").font(.caption)
                                         TextEditor(text: $menu.impression).frame(minHeight: 90)
                                             .border(Color.secondary.opacity(0.25)).accessibilityLabel("메뉴 감상")
@@ -148,6 +149,36 @@ struct ReviewPreparationView: View {
         }
     }
 
+    private func trimMenuPhotos() {
+        let available = Set(review.photoIDs)
+        for index in review.menus.indices {
+            review.menus[index].photoIDs.removeAll { !available.contains($0) }
+        }
+    }
+
+    private func menuPhotos(menuID: String) -> some View {
+        DisclosureGroup("메뉴 사진 · \(review.menus.first { $0.id == menuID }?.photoIDs.count ?? 0)장 (여러 장 선택 가능)") {
+            Text("이 메뉴의 사진을 선택하세요. 메뉴명이 초안의 사진 설명에 자동으로 반영됩니다.")
+                .font(.caption).foregroundStyle(.secondary)
+            if library.canRead, let visit {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 10) {
+                    ForEach(visit.assets, id: \.localIdentifier) { asset in
+                        VStack {
+                            PhotoThumbnail(asset: asset, manager: library.imageManager)
+                            Toggle("선택", isOn: Binding(
+                                get: { review.menus.first { $0.id == menuID }?.photoIDs.contains(asset.localIdentifier) ?? false },
+                                set: { selected in
+                                    guard let index = review.menus.firstIndex(where: { $0.id == menuID }) else { return }
+                                    review.menus[index].photoIDs.removeAll { $0 == asset.localIdentifier }
+                                    if selected { review.menus[index].photoIDs.append(asset.localIdentifier) }
+                                }))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func load() {
         guard !loaded else { return }
         guard let visit else {
@@ -170,6 +201,7 @@ struct ReviewPreparationView: View {
             }
             review.photoIDs = photoIDs
             review.restaurantName = name
+            trimMenuPhotos()
             baseline = review
             loaded = true
         } catch {
@@ -185,6 +217,7 @@ struct ReviewPreparationView: View {
         review.id = UUID().uuidString
         review.photoIDs = ids
         review.restaurantName = name
+        trimMenuPhotos()
     }
 
     @discardableResult private func save() -> Bool {

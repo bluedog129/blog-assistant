@@ -7,6 +7,23 @@ import Foundation
         review.visitDate = Date(timeIntervalSince1970: 1_700_000_000)
         review.photoIDs = ["private-photo-id"]
         review.menus = [ReviewMenu(name: "파스타", price: "18,000원", impression: "담백했어요")]
+        let legacyMenu = Data(#"{"id":"legacy","name":"파스타","price":"","impression":"맛있음"}"#.utf8)
+        let decodedLegacyMenu = try JSONDecoder().decode(ReviewMenu.self, from: legacyMenu)
+        precondition(decodedLegacyMenu.photoIDs.isEmpty)
+        var linkedReview = review
+        linkedReview.photoIDs = ["first", "second", "shared"]
+        linkedReview.menus = [
+            ReviewMenu(name: "파스타", impression: "담백", photoIDs: ["first", "second", "shared", "missing"]),
+            ReviewMenu(name: "피자", impression: "바삭", photoIDs: ["shared"])
+        ]
+        let linkedPhotos = MenuDraftPhotos.make(review: linkedReview)
+        precondition(linkedPhotos.map(\.id) == ["first", "second", "shared"])
+        precondition(linkedPhotos.last?.caption == "파스타 · 피자")
+        let encodedMenu = try JSONEncoder().encode(linkedReview.menus[0])
+        let decodedMenu = try JSONDecoder().decode(ReviewMenu.self, from: encodedMenu)
+        precondition(decodedMenu == linkedReview.menus[0])
+        let linkedPrompt = try DraftPrompt.make(review: linkedReview, references: nil, photos: linkedPhotos)
+        precondition(linkedPrompt.contains("photoNumbers") && !linkedPrompt.contains("shared") && !linkedPrompt.contains("missing"))
         let reference = ReferencePacket(type: "blog-assistant.references", version: 1, blogID: "test", categoryNo: "65", categoryName: "맛집", collectedAt: "now", articles: [ReferenceArticle(postID: "123", title: "참고 제목", publishedDate: "2026-10-07", url: "https://blog.naver.com/test/123", body: "문체 예시 [사진]", photoCount: 1)], warnings: [])
         let prompt = try DraftPrompt.make(review: review, references: reference)
         precondition(prompt.contains("테스트 식당") && prompt.contains("담백했어요") && prompt.contains("문체 예시"))

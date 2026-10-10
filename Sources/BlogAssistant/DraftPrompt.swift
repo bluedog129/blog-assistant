@@ -14,12 +14,12 @@ enum DraftPrompt {
             let businessInfo: String
             let waitingNote: String
             let menus: [Menu]
-            struct Menu: Encodable { let name: String; let price: String; let impression: String }
+            struct Menu: Encodable { let name: String; let price: String; let impression: String; let photoNumbers: [Int] }
         }
         struct Style: Encodable { let title: String; let body: String }
         let facts = Facts(restaurantName: review.restaurantName, visitDate: formatter.string(from: review.visitDate!),
                           businessInfo: review.businessInfo, waitingNote: review.waitingNote,
-                          menus: review.menus.map { Facts.Menu(name: $0.name, price: $0.price, impression: $0.impression) })
+                          menus: review.menus.map { menu in Facts.Menu(name: menu.name, price: menu.price, impression: menu.impression, photoNumbers: photos.enumerated().compactMap { menu.photoIDs.contains($0.element.id) ? $0.offset + 1 : nil }) })
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let factsText = String(decoding: try encoder.encode(facts), as: UTF8.self)
@@ -40,6 +40,7 @@ enum DraftPrompt {
         - 메뉴 감상을 자연스럽게 풀되 원래 의미와 긍정·부정의 정도를 유지하세요.
         - 실제 사진 파일은 제공되지 않습니다. 사진 목록의 설명만 참고하고 사진 내용을 단정하지 마세요.
         - 사진 목록의 순서를 유지하고 각 사진을 정확히 한 번씩 배치하세요. 표시를 별도 줄에 [사진 1], [사진 2] 형식으로 넣으세요. 대괄호 안에 설명을 덧붙이지 마세요.
+        - 메뉴의 photoNumbers는 해당 메뉴에 연결된 사진 번호입니다. 메뉴 설명 근처에 연결된 사진들을 배치하되 사진 목록의 순서를 유지하세요.
         - 사진 목록이 비어 있으면 사진 표시를 넣지 마세요. 설명 없는 사진의 내용은 지어내지 마세요.
         - 참고 글이 없으면 담백한 존댓말과 짧은 문단을 사용하세요.
         - 제목 1개, 본문, 관련 해시태그 순서로 출력하세요. 설명이나 코드 블록 없이 편집 가능한 글만 출력하세요.

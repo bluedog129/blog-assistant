@@ -162,8 +162,9 @@ struct DraftView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
                 Text("① 사진 선택 · \(plan.selected.count)장").font(.headline)
-                Text("추가할 때 가게 전경·메뉴명·반찬 등 사진 설명을 직접 입력하세요. 선택한 순서가 사진 번호가 됩니다.").font(.caption).foregroundStyle(.secondary)
+                Text("메뉴에 연결한 사진은 메뉴명이 자동 입력됩니다. 전경·반찬 등 다른 사진은 설명을 입력해 추가하세요. 선택 순서가 사진 번호입니다.").font(.caption).foregroundStyle(.secondary)
                 HStack {
+                    Button("메뉴 사진 추가") { addMenuPhotos(); persistPlan() }
                     Button("선택 해제") { plan.selected = []; persistPlan() }
                 }.disabled(!loaded || loadFailed || exporting || !library.canRead)
                 ForEach(Array(plan.selected.enumerated()), id: \.element.id) { index, photo in
@@ -221,11 +222,20 @@ struct DraftView: View {
         do {
             draft = try DraftStore().latest(reviewID: review.id)
             plan = try DraftPhotoPlanStore().load(reviewID: review.id)
+            if draft == nil && plan.selected.isEmpty && plan.requestPhotos == nil {
+                addMenuPhotos()
+                try DraftPhotoPlanStore().save(plan, reviewID: review.id)
+            }
             text = draft?.text ?? ""; baseline = text
         } catch { loadFailed = true; message = "기존 초안 또는 사진 구성을 읽지 못했습니다. 기존 자료 보호를 위해 저장·가져오기를 중단했습니다." }
         do { references = try ReferenceStore().load() }
         catch { referenceError = "참고 글을 읽지 못했습니다. 참고 글 관리에서 확인하거나 문체 사용을 끄세요." }
         loaded = true
+    }
+    private func addMenuPhotos() {
+        for photo in MenuDraftPhotos.make(review: review) where !plan.selected.contains(where: { $0.id == photo.id }) {
+            plan.selected.append(photo)
+        }
     }
     private func persistPlan() {
         guard !loadFailed else { return }

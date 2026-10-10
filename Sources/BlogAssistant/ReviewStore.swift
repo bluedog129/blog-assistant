@@ -5,6 +5,22 @@ struct ReviewMenu: Codable, Identifiable, Equatable {
     var name = ""
     var price = ""
     var impression = ""
+    var photoIDs: [String] = []
+
+    init(id: String = UUID().uuidString, name: String = "", price: String = "", impression: String = "", photoIDs: [String] = []) {
+        self.id = id; self.name = name; self.price = price
+        self.impression = impression; self.photoIDs = photoIDs
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, price, impression, photoIDs }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        price = try values.decode(String.self, forKey: .price)
+        impression = try values.decode(String.self, forKey: .impression)
+        photoIDs = try values.decodeIfPresent([String].self, forKey: .photoIDs) ?? []
+    }
 }
 
 struct VisitReview: Codable, Identifiable, Equatable {
