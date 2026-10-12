@@ -1,4 +1,4 @@
-import {validatePacket,inspectEditor,supplyPhoto,openPhotoUpload,restorePhotoPicker,editorPoint,validateContent} from './post-packet.js';
+import {validatePacket,inspectEditor,supplyPhoto,openPhotoUpload,restorePhotoPicker,editorPoint,validateContent,formattingControls,paragraphStyle} from './post-packet.js';
 const $=id=>document.getElementById(id);
 let packet=null, files=new Map(), running=false, stopped=false, tabID=null, attached=false;
 let bridgeToken=null, bridgeJob=null, bridgeClaimed=false, reportQueue=Promise.resolve();
@@ -16,7 +16,13 @@ const status=message=>{$('status').textContent=message;if(running)void report('p
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 const normalize=text=>text.replace(/[\u200b\ufeff]/g,'').replace(/\s+/g,' ').trim();
 function check(){if(stopped)throw new Error('중단했습니다. 편집기 탭에 입력된 내용은 남아 있습니다.');}
-async function execute(func,args){check();const result=await chrome.scripting.executeScript({target:{tabId:tabID},func,args});return result[0]?.result;}
+async function checkActiveJob(){
+ check();
+ if(!bridgeClaimed)return;
+ try{await bridgeFetch(`/jobs/${bridgeJob}/active`);}catch(error){stopped=true;throw new Error('앱 작업이 중단되었거나 연결이 끊겼습니다. 편집기 탭에 입력된 내용은 남아 있습니다.');}
+ check();
+}
+async function execute(func,args){await checkActiveJob();const result=await chrome.scripting.executeScript({target:{tabId:tabID},func,args});return result[0]?.result;}
 async function inspect(){return execute(inspectEditor,[packet.blogID]);}
 async function pointFor(kind){
  await command('Page.bringToFront');
@@ -24,7 +30,7 @@ async function pointFor(kind){
  await delay(300);
  return execute(editorPoint,[packet.blogID,kind]);
 }
-async function command(method,params={}){check();await chrome.debugger.sendCommand({tabId:tabID},method,params);}
+async function command(method,params={}){await checkActiveJob();await chrome.debugger.sendCommand({tabId:tabID},method,params);}
 async function click(point){if(!point)throw new Error('편집기 버튼·입력 위치를 확인하지 못했습니다.');await command('Input.dispatchMouseEvent',{type:'mousePressed',x:point.x,y:point.y,button:'left',clickCount:1});await command('Input.dispatchMouseEvent',{type:'mouseReleased',x:point.x,y:point.y,button:'left',clickCount:1});await delay(250);}
 async function key(name,code,vk){await command('Input.dispatchKeyEvent',{type:'keyDown',key:name,code,windowsVirtualKeyCode:vk});await command('Input.dispatchKeyEvent',{type:'keyUp',key:name,code,windowsVirtualKeyCode:vk});}
 async function insertBodyText(text) {
@@ -35,6 +41,41 @@ async function insertBodyText(text) {
    const parts=lines[i].match(/[\u{10000}-\u{10FFFF}]|[^\u{10000}-\u{10FFFF}]+/gu)||[];
    for(const part of parts) { await command('Input.insertText',{text:part}); await delay(100); }
  }
+}
+async function styleControl(name,value=null){return execute(formattingControls,[packet.blogID,name,value]);}
+async function chooseStyle(name,value){
+ await click((await styleControl(name)).point);
+ await click((await styleControl(name,value)).point);
+}
+async function applyStyle(style){
+ const bold=await styleControl('bold');
+ if(bold.selected!==style.bold)await click(bold.point);
+ const size=await styleControl('font-size');
+ if(size.text!==String(style.size))await chooseStyle('font-size','fs'+style.size);
+ // Color is explicit so inherited title/photo styles cannot bleed into body text.
+ const rgb=`rgb(${parseInt(style.color.slice(1,3),16)}, ${parseInt(style.color.slice(3,5),16)}, ${parseInt(style.color.slice(5,7),16)})`;
+ const color=await styleControl('font-color');
+ if(color.color!==rgb){await click(color.point);await click((await styleControl('color-option',style.color)).point);}
+}
+async function prepareRecordStyle(){
+ await chooseStyle('font-family','nanumgothic');
+ await chooseStyle('align-drop-down-with-justify','left');
+ await chooseStyle('line-height','180');
+ for(const name of ['italic','underline','strikethrough']){
+   const control=await styleControl(name);if(control.selected)await click(control.point);
+ }
+}
+async function insertStyledText(paragraphs){
+ for(let i=0;i<paragraphs.length;i++){
+   if(i){await key('Enter','Enter',13);await delay(100);}
+   const paragraph=paragraphs[i];
+   for(const run of paragraph.runs){
+     await applyStyle(paragraphStyle(paragraph.role,run.bold));
+     await insertBodyText(run.text);
+   }
+ }
+ // Reset before the following paragraph or photo. No marker characters enter the editor.
+ await applyStyle(paragraphStyle('body'));
 }
 async function waitFor(test,message,timeout=30000){const start=Date.now();while(Date.now()-start<timeout){check();try{const state=await inspect();if(test(state))return state;}catch(error){if(stopped)throw error;}await delay(400);}throw new Error(message);}
 $('files').addEventListener('change',async()=>{
@@ -54,6 +95,7 @@ async function runPosting(){
  if(running||!packet)return;
  running=true;stopped=false;$('start').disabled=true;$('files').disabled=true;$('stop').disabled=false;
  try{
+   await checkActiveJob();
    const tab=await chrome.tabs.create({url:`https://blog.naver.com/PostWriteForm.naver?blogId=${encodeURIComponent(packet.blogID)}&Redirect=Write&categoryNo=${packet.categoryNo}`,active:true});tabID=tab.id;
    await waitFor(s=>{
      if(s.recoveryPrompt) { status('이전 작성 글 안내가 열려 있습니다. 기존 글을 보관할지 확인한 뒤 직접 새 글 작성을 선택하세요. 안내가 닫히면 자동으로 계속합니다.'); return false; }
@@ -71,7 +113,7 @@ async function runPosting(){
    for(let i=0;i<packet.blocks.length;i++){
      check();const block=packet.blocks[i];status(`본문 입력 ${i+1}/${packet.blocks.length}`);
      if(block.kind==='text'){
-       await insertBodyText(block.text);
+       if(packet.version===2){await prepareRecordStyle();await insertStyledText(block.paragraphs);}else await insertBodyText(block.text);
        await delay(200);await key('Enter','Enter',13);await key('Enter','Enter',13);
      }else{
        state=await inspect();const count=state.imageCount;
@@ -98,7 +140,7 @@ async function runPosting(){
    $('status').textContent=value;
    try{await report('failure',value);}catch{}
  }
- finally{try{const result=await chrome.scripting.executeScript({target:{tabId:tabID},func:restorePhotoPicker,args:[]});}catch{}if(attached){try{await command('Page.setInterceptFileChooserDialog',{enabled:false});}catch{}attached=false;try{await chrome.debugger.detach({tabId:tabID});}catch{}}running=false;$('files').disabled=false;$('stop').disabled=true;$('start').disabled=!!bridgeJob||!packet;}
+ finally{try{const result=await chrome.scripting.executeScript({target:{tabId:tabID},func:restorePhotoPicker,args:[]});}catch{}if(attached){try{await chrome.debugger.sendCommand({tabId:tabID},'Page.setInterceptFileChooserDialog',{enabled:false});}catch{}attached=false;try{await chrome.debugger.detach({tabId:tabID});}catch{}}running=false;$('files').disabled=false;$('stop').disabled=true;$('start').disabled=!!bridgeJob||!packet;}
 }
 $('start').addEventListener('click',runPosting);
 

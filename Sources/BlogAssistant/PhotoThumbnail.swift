@@ -33,7 +33,10 @@ struct PhotoThumbnail: View {
                 } else {
                     ProgressView().controlSize(.small)
                 }
-            }.aspectRatio(showFullImage ? CGFloat(max(1, asset.pixelWidth)) / CGFloat(max(1, asset.pixelHeight)) : 1, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 10))
+            }.aspectRatio(showFullImage ? CGFloat(max(1, asset.pixelWidth)) / CGFloat(max(1, asset.pixelHeight)) : 1, contentMode: .fit)
+                // Cropping an image alone does not limit its hit-testing area.
+                .contentShape(Rectangle())
+                .clipShape(RoundedRectangle(cornerRadius: 10))
             Text(asset.creationDate.map { $0.formatted(date: .omitted, time: .shortened) } ?? "시간 정보 없음")
                 .font(.caption).foregroundStyle(.secondary)
         }

@@ -21,6 +21,8 @@ import SwiftUI
         let folder: URL
         let packet: NaverPostPacket
         var claimed = false
+        let createdAt = Date()
+        var lastActivity = Date()
     }
     init(defaults: UserDefaults = .standard, port: UInt16 = 48765) {
         self.defaults = defaults
@@ -74,17 +76,9 @@ import SwiftUI
         let chrome = URL(fileURLWithPath: "/Applications/Google Chrome.app")
         do {
             _ = try await NSWorkspace.shared.open([url], withApplicationAt: chrome, configuration: NSWorkspace.OpenConfiguration())
-        } catch { finish("Chrome을 열지 못했습니다. Chrome 설치와 확장 프로그램 연결을 확인하세요."); throw error }
-        timeout = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 90_000_000_000)
-            guard !Task.isCancelled, let self else { return }
-            if self.busy, self.job?.id == id, self.job?.claimed == false {
-                self.finish("확장 프로그램이 작업을 받지 못했습니다. Chrome 프로필·확장 프로그램 새로고침·연결 코드를 확인하세요.")
-                return
-            }
-            try? await Task.sleep(nanoseconds: 1_110_000_000_000)
-            guard !Task.isCancelled, self.busy, self.job?.id == id else { return }
-            self.finish("임시저장 결과를 확인하지 못했습니다. 네이버 편집기와 임시저장 목록을 확인하세요.")
+        } catch {
+            if job?.id == id { finish("Chrome을 열지 못했습니다. Chrome 설치와 확장 프로그램 연결을 확인하세요.") }
+            throw error
         }
     }
     func prepareJob(folder: URL) throws -> String {
@@ -96,7 +90,29 @@ import SwiftUI
         previousResultUnknown = false
         busy = true; message = "Chrome에 글과 사진을 전달하는 중…"
         defaults.set(true, forKey: "naverBridge.pending")
+        // Include Chrome launch time and jobs prepared without opening Chrome.
+        timeout = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { return }
+                guard let self, self.busy, self.job?.id == id else { return }
+                self.expireInactiveJob()
+            }
+        }
         return id
+    }
+    func cancelCurrentJob() {
+        guard busy else { return }
+        finish("작업을 중단했습니다. 네이버 편집기에 입력된 내용은 남아 있습니다. 다시 시작하기 전에 기존 탭과 임시저장 목록을 확인하세요.")
+    }
+    func expireInactiveJob(now: Date = Date()) {
+        guard busy, let job else { return }
+        if !job.claimed, now.timeIntervalSince(job.createdAt) >= 90 {
+            finish("확장 프로그램이 작업을 받지 못했습니다. Chrome 프로필·확장 프로그램 새로고침·연결 코드를 확인하세요.")
+        } else if now.timeIntervalSince(job.createdAt) >= 1200 {
+            finish("임시저장 결과를 확인하지 못했습니다. 네이버 편집기와 임시저장 목록을 확인하세요.")
+        } else if job.claimed, now.timeIntervalSince(job.lastActivity) >= 180 {
+            finish("Chrome 작업의 응답이 3분 동안 없어 중단했습니다. 기존 작업 탭과 네이버 임시저장 목록을 확인한 뒤 다시 시도하세요.")
+        }
     }
     func disconnect() {
         guard !busy else { return }
@@ -108,6 +124,7 @@ import SwiftUI
         busy = false; message = value; timeout?.cancel(); timeout = nil
         defaults.set(false, forKey: "naverBridge.pending")
         if let job { try? FileManager.default.removeItem(at: job.folder) }
+        job = nil
     }
     private func respond(_ request: BridgeHTTPRequest) -> BridgeHTTPResponse {
         guard let configuration, request.headers["host"] == "127.0.0.1:\(port)" else { return .text(403, "접근이 허용되지 않습니다.") }
@@ -137,19 +154,26 @@ import SwiftUI
         if request.method == "POST", request.path == prefix + "/claim" {
             guard !current.claimed else { return allow(.text(409, "이미 전달한 작업입니다. 중복 입력은 하지 않습니다.")) }
             job?.claimed = true
+            job?.lastActivity = Date()
             return allow(BridgeHTTPResponse(status: 200, body: (try? JSONEncoder().encode(current.packet)) ?? Data(), type: "application/json"))
+        }
+        // Check before each editor operation so a cancelled or expired job cannot resume.
+        if request.method == "GET", request.path == prefix + "/active", current.claimed {
+            job?.lastActivity = Date()
+            return allow(.text(200, "active"))
         }
         if request.method == "GET", request.path.hasPrefix(prefix + "/photos/"), current.claimed,
            let number = Int(request.path.dropFirst((prefix + "/photos/").count)),
            let photo = current.packet.photos.first(where: { $0.number == number }),
            let bytes = try? Data(contentsOf: current.folder.appendingPathComponent(photo.filename)) {
+            job?.lastActivity = Date()
             return allow(BridgeHTTPResponse(status: 200, body: bytes, type: "image/jpeg"))
         }
         if request.method == "POST", request.path == prefix + "/status", current.claimed {
             struct Status: Decodable { let state: String; let message: String }
             guard let result = try? JSONDecoder().decode(Status.self, from: request.body), result.message.count <= 3000,
                   ["progress", "success", "failure"].contains(result.state) else { return allow(.text(400, "상태 형식 오류")) }
-            if result.state == "progress" { message = result.message }
+            if result.state == "progress" { job?.lastActivity = Date(); message = result.message }
             else { finish(result.state == "success" ? "네이버 임시저장 완료" : "임시저장 중단: \(result.message)") }
             return allow(.text(200, "ok"))
         }

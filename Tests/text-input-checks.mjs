@@ -3,7 +3,7 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 const source=fs.readFileSync('chrome-extension/posting.js','utf8');
 const start=source.indexOf('async function insertBodyText(');
-const end=source.indexOf('async function waitFor(',start);
+const end=source.indexOf('async function styleControl(',start);
 let result='', chunks=[];
 const context=vm.createContext({
  command:async(method,{text})=>{assert.equal(method,'Input.insertText');assert.ok(!text.includes('\n'));chunks.push(text);result+=text;},

@@ -8,12 +8,13 @@ const dom=new JSDOM('<input id="files"><button id="start"></button><button id="s
 globalThis.document=dom.window.document;globalThis.location=dom.window.location;globalThis.File=File;
 const packet={type:'blog-assistant.naver-post',version:1,blogID:'bluedog129',categoryNo:'65',title:'테스트 글',blocks:[{kind:'text',text:'첫 문단'},{kind:'photo',photoNumber:1},{kind:'text',text:'감상'}],photos:[{number:1,filename:'01_사진.jpg',caption:'사진'}]};
 const token='a'.repeat(64);
-const reports=[];let claims=0, focus=null, detached=null, inspections=0;
+const reports=[];let claims=0, activeChecks=0, focus=null, detached=null, inspections=0;
 const state={ready:true,title:'',texts:[''],imageCount:0,components:[],fileInputCount:1,saveSignals:[],temporaryCount:'0'};
 globalThis.fetch=async(url,options={})=>{
  assert.ok(url.startsWith(`http://127.0.0.1:48765/jobs/${id}/`));
  assert.equal(options.headers['X-Blog-Assistant-Token'],token);
  if(url.endsWith('/claim')){claims++;return new Response(JSON.stringify(packet));}
+ if(url.endsWith('/active')){activeChecks++;return new Response('active');}
  if(url.endsWith('/photos/1'))return new Response(new Uint8Array([1,2,3]),{headers:{'Content-Type':'image/jpeg'}});
  if(url.endsWith('/status')){reports.push(JSON.parse(options.body));return new Response('ok');}
  throw new Error('Unexpected endpoint');
@@ -40,6 +41,7 @@ globalThis.chrome={
 await import('../chrome-extension/posting.js');
 for(let i=0;i<500&&!reports.some(r=>r.state==='success');i++)await new Promise(r=>setTimeout(r,20));
 assert.equal(claims,1);
+assert.ok(activeChecks>10);
 assert.ok(reports.some(r=>r.message.includes('이전 작성 글 안내')));
 assert.ok(reports.some(r=>r.state==='success'));
 await new Promise(r=>setTimeout(r,20));

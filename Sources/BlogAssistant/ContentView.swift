@@ -8,13 +8,26 @@ private enum VisitFilter: String, CaseIterable {
     case all = "전체"
 }
 
+private enum ContentSheet: Identifiable {
+    case visitDetail(String)
+    case reviewPreparation(String)
+    case references
+    case chromeConnection
+
+    var id: String {
+        switch self {
+        case .visitDetail(let visitID): return "detail:\(visitID)"
+        case .reviewPreparation(let visitID): return "preparation:\(visitID)"
+        case .references: return "references"
+        case .chromeConnection: return "chrome-connection"
+        }
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var library: PhotoLibraryStore
     @Environment(\.scenePhase) private var scenePhase
-    @State private var selectedVisit: PhotoVisit?
-    @State private var preparationVisit: PhotoVisit?
-    @State private var referenceManagerVisible = false
-    @State private var chromeConnectionVisible = false
+    @State private var activeSheet: ContentSheet?
     @State private var visitFilter: VisitFilter = .pending
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 230), spacing: 16)]
 
@@ -50,8 +63,8 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("참고 글 관리") { referenceManagerVisible = true }
-                Button("Chrome 연결") { chromeConnectionVisible = true }
+                Button("참고 글 관리") { activeSheet = .references }
+                Button("Chrome 연결") { activeSheet = .chromeConnection }
                 if library.canRead {
                     Button { library.refresh() } label: {
                         Label("새로고침", systemImage: "arrow.clockwise")
@@ -66,13 +79,17 @@ struct ContentView: View {
             }
         }
         .task { library.refresh() }
-        .sheet(isPresented: $referenceManagerVisible) { ReferenceManagerView() }
-        .sheet(isPresented: $chromeConnectionVisible) { ChromeConnectionView() }
-        .sheet(item: $selectedVisit) { visit in
-            VisitDetailView(visitID: visit.id, library: library)
-        }
-        .sheet(item: $preparationVisit) { visit in
-            ReviewPreparationView(visitID: visit.id, library: library)
+        .sheet(item: $activeSheet) { destination in
+            switch destination {
+            case .visitDetail(let visitID):
+                VisitDetailView(visitID: visitID, library: library)
+            case .reviewPreparation(let visitID):
+                ReviewPreparationView(visitID: visitID, library: library)
+            case .references:
+                ReferenceManagerView()
+            case .chromeConnection:
+                ChromeConnectionView()
+            }
         }
         .onChange(of: scenePhase) { phase in
             if phase == .active { library.refresh() }
@@ -116,7 +133,8 @@ struct ContentView: View {
                                         LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
                                             ForEach(visit.assets, id: \.localIdentifier) { asset in
                                                 PhotoThumbnail(asset: asset, manager: library.imageManager)
-                                                    .onTapGesture { selectedVisit = visit }
+                                                    .contentShape(Rectangle())
+                                                    .onTapGesture { activeSheet = .visitDetail(visit.id) }
                                             }
                                         }
                                     }.padding(16)
@@ -150,7 +168,7 @@ struct ContentView: View {
                     Label("정리 완료", systemImage: "checkmark.circle.fill")
                         .font(.caption).foregroundStyle(.green)
                 }
-                Button("상세 보기") { selectedVisit = visit }
+                Button("상세 보기") { activeSheet = .visitDetail(visit.id) }
             }
             if let start = visit.start, let end = visit.end {
                 Text("\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))")
@@ -171,7 +189,7 @@ struct ContentView: View {
                 HStack {
                     Text(library.reviewStatus(for: visit)).font(.subheadline).foregroundStyle(.secondary)
                     Spacer()
-                    Button("후기 작성 준비") { preparationVisit = visit }
+                    Button("후기 작성 준비") { activeSheet = .reviewPreparation(visit.id) }
                         .buttonStyle(.borderedProminent)
                 }
             }

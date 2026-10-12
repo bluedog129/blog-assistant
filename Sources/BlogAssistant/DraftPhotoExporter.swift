@@ -4,7 +4,7 @@ import ImageIO
 import UniformTypeIdentifiers
 
 @MainActor enum DraftPhotoExporter {
-    static func export(_ photos: [DraftPhoto], assets: [String: PHAsset], folder: URL, postText: String? = nil) async throws -> URL {
+    static func export(_ photos: [DraftPhoto], assets: [String: PHAsset], folder: URL, postText: String? = nil, template: DraftTemplate = .plain, review: VisitReview? = nil) async throws -> URL {
         guard (postText != nil || !photos.isEmpty), photos.allSatisfy({ assets[$0.id] != nil }) else {
             throw failure("선택한 사진 중 사용할 수 없는 사진이 있습니다. 권한과 방문 구성을 확인하세요.")
         }
@@ -40,7 +40,7 @@ import UniformTypeIdentifiers
                 filenames.append(name)
             }
             if let postText {
-                let packet = try NaverPostPacket.make(text: postText, photos: photos, filenames: filenames)
+                let packet = try NaverPostPacket.make(text: postText, photos: photos, filenames: filenames, template: template, review: review)
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
                 try encoder.encode(packet).write(to: output.appendingPathComponent("naver-post.json"), options: .atomic)

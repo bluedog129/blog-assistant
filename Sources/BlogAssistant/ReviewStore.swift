@@ -75,6 +75,8 @@ final class ReviewStore {
         return try records().filter { !ids.isDisjoint(with: $0.photoIDs) }
     }
 
+    func load(id: String) throws -> VisitReview? { try records().first { $0.id == id } }
+
     func save(_ review: VisitReview) throws {
         guard !review.photoIDs.isEmpty else { return }
         let ids = Set(review.photoIDs)

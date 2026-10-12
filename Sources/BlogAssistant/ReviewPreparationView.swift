@@ -83,7 +83,7 @@ struct ReviewPreparationView: View {
                                     .border(Color.secondary.opacity(0.25)).accessibilityLabel("방문 계기")
                                 Button { searchRestaurant() } label: { Label("네이버에서 검색", systemImage: "magnifyingglass") }
                                 Text("영업정보 (선택)").font(.headline)
-                                Text("영업시간·브레이크타임·휴무·라스트오더 등을 찾아 한 번에 붙여넣으세요.")
+                                Text("영업시간: 11:00–21:00 / 휴무: 월요일 / 브레이크타임: 15:00–17:00처럼 항목마다 줄을 나누어 입력하세요. 비운 항목은 생략하며, 구분되지 않는 내용도 그대로 보존합니다.")
                                     .font(.caption).foregroundStyle(.secondary)
                                 TextEditor(text: $review.businessInfo).frame(minHeight: 110)
                                     .border(Color.secondary.opacity(0.25))

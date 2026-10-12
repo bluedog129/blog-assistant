@@ -10,6 +10,21 @@ struct BlogDraft: Codable, Identifiable {
     var updatedAt: Date
     var text: String
     var photos: [DraftPhoto]? = nil
+    var template: DraftTemplate? = nil
+
+    // A direct paste into the editor can replace the text without passing through
+    // the import button. Adopt a recorded request only when the old photo list
+    // cannot describe the text and the requested list describes every marker.
+    func repairingPhotoConnection(text: String, plan: DraftPhotoPlan, now: Date = Date()) -> BlogDraft? {
+        guard let requested = plan.requestPhotos,
+              Set(requested.map(\.id)).count == requested.count,
+              plan.requestReview == nil || plan.requestReview?.id == reviewID,
+              !DraftLayout.warnings(text: text, photoCount: (photos ?? requested).count).isEmpty,
+              DraftLayout.warnings(text: text, photoCount: requested.count).isEmpty else { return nil }
+        return BlogDraft(reviewID: reviewID, sourceReview: plan.requestReview ?? sourceReview,
+                         referencePostIDs: plan.referencePostIDs ?? referencePostIDs, model: model,
+                         createdAt: now, updatedAt: now, text: text, photos: requested, template: template)
+    }
 }
 
 final class DraftStore {
