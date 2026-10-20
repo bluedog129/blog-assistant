@@ -69,11 +69,31 @@ export function inspectEditor(blogID) {
   const save=buttons.find(b=>b.textContent.trim()==='저장');
   const photoButton=buttons.find(b=>(b.getAttribute('aria-label')||'')==='사진 추가' || b.getAttribute('data-name')==='image');
   const fileInputs=[...document.querySelectorAll('input[type=file]')];
+  const visible=el=>{if(!el)return false;const r=el.getBoundingClientRect();const style=getComputedStyle(el);return r.width>0&&r.height>0&&style.visibility!=='hidden'&&style.display!=='none';};
+  const buttonState=el=>el?{disabled:el.disabled,ariaDisabled:el.getAttribute('aria-disabled'),visible:visible(el),className:el.className}:null;
+  // Image components appear before the upload finishes; blob/data previews are not uploaded photos.
+  const imageReadyCount=image.filter(el=>{
+    const resources=[...el.querySelectorAll('img.se-image-resource')];
+    return resources.length>0&&resources.every(img=>img.complete&&img.naturalWidth>0&&/^https:\/\//.test(img.currentSrc||img.src));
+  }).length;
+  const uploadBusy=[...document.querySelectorAll('.se-progressbar')].some(visible);
+  const selection=document.getSelection();
+  const selectionElement=selection?.anchorNode?.nodeType===1?selection.anchorNode:selection?.anchorNode?.parentElement;
+  const selectionComponent=selectionElement?.closest('.se-component');
+  const uploadDiagnostics={
+    imageReadyCount,uploadBusy,
+    documentReady:document.readyState,hasFocus:document.hasFocus(),
+    photoButton:buttonState(photoButton),
+    fileInputs:fileInputs.slice(0,16).map(el=>({accept:el.accept,multiple:el.multiple,disabled:el.disabled,visible:visible(el),connected:el.isConnected})),
+    iframeCount:document.querySelectorAll('iframe').length,
+    selectionComponent:selectionComponent?.className||null,
+    activeElement:document.activeElement?{tag:document.activeElement.tagName,className:document.activeElement.className}:null
+  };
   const recoveryPrompt=[...document.querySelectorAll('[role="dialog"], .se-popup, .se-popup-container, .se-layer')].some(el=>{
     const r=el.getBoundingClientRect();
     return r.width>0 && r.height>0 && /작성\s*중인|작성하던|이어서\s*작성|자동\s*저장된|저장된\s*글을.*불러/.test(el.innerText||'');
   });
-  return {recoveryPrompt,ready:!!title&&text.length>0,title:clean(title),texts:text.map(clean),imageCount:image.length,
+  return {uploadDiagnostics,recoveryPrompt,ready:!!title&&text.length>0,title:clean(title),texts:text.map(clean),imageCount:image.length,
     components:all.filter(el=>!el.classList.contains('se-documentTitle')).map(el=>({kind:el.classList.contains('se-text')?'text':el.classList.contains('se-image')||el.classList.contains('se-imageGroup')?'photo':'other',text:clean(el),paragraphs:el.classList.contains('se-text')?formatting(el):undefined})),
     titlePoint:point(title?.querySelector('.se-text-paragraph')),bodyPoint:point(text.at(-1)?.querySelector('.se-text-paragraph:last-child')),
     photoPoint:point(photoButton),savePoint:point(save),fileInputCount:fileInputs.length,
@@ -98,7 +118,7 @@ export function editorPoint(blogID, kind) {
   let element;
   if(kind === 'title') element = document.querySelector('.se-documentTitle .se-text-paragraph');
   if(kind === 'body') element = [...document.querySelectorAll('.se-component.se-text')].at(-1)?.querySelector('.se-text-paragraph:last-child');
-  if(kind === 'photo') element = document.querySelector('button[data-name="image"]');
+  if(kind === 'photo') element = document.querySelector('button.se-image-toolbar-button[data-name="image"]')||document.querySelector('button[data-name="image"]');
   if(kind === 'save') element = [...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='저장');
   if(!element) throw new Error('입력 위치를 확인하지 못했습니다.');
   element.scrollIntoView({block:'center',behavior:'instant'});
@@ -163,12 +183,16 @@ export function formattingControls(blogID,name,value){
  return {point:{x:r.left+r.width/2,y:r.top+r.height/2},selected:el.classList.contains('se-is-selected'),text:el.querySelector('.se-toolbar-label')?.textContent.trim(),color:el.querySelector('[data-role="color"]')?.style.backgroundColor};
 }
 
-export function openPhotoUpload(blogID) {
+export function photoUploadComplete(state, previousCount) {
+ return state.imageCount===previousCount+1&&state.uploadDiagnostics?.imageReadyCount===previousCount+1&&state.uploadDiagnostics?.uploadBusy===false;
+}
+
+export function preparePhotoUpload(blogID) {
  const url = new URL(location.href);
  if (url.host !== 'blog.naver.com' || url.pathname !== '/PostWriteForm.naver' || url.searchParams.get('blogId') !== blogID) throw new Error('글쓰기 대상이 바뀌었습니다.');
- const button = document.querySelector('button[data-name="image"]');
- if (!button || button.disabled) throw new Error('사진 추가 버튼을 사용할 수 없습니다.');
- // Let SmartEditor prepare the upload input, but cancel its native picker.
+ const button = document.querySelector('button.se-image-toolbar-button[data-name="image"]')||document.querySelector('button[data-name="image"]');
+ if (!button || button.disabled || button.getAttribute('aria-disabled')==='true') throw new Error('사진 추가 버튼을 사용할 수 없습니다.');
+ // Install the guard before the trusted CDP mouse click, without activating the button here.
  // CDP interception alone can leave native chooser requests queued on macOS.
  if (!window.__blogAssistantFileClickGuard) {
    const guard = event => {
@@ -177,8 +201,8 @@ export function openPhotoUpload(blogID) {
    window.__blogAssistantFileClickGuard = guard;
    document.addEventListener('click', guard, true);
  }
- button.click();
- return true;
+ return {fileInputCountBefore:document.querySelectorAll('input[type=file]').length,
+   disabled:button.disabled,ariaDisabled:button.getAttribute('aria-disabled')};
 }
 
 export function restorePhotoPicker() {

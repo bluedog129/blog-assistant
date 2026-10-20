@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
-import {openPhotoUpload,restorePhotoPicker} from '../chrome-extension/post-packet.js';
+import {preparePhotoUpload,restorePhotoPicker} from '../chrome-extension/post-packet.js';
 const require=createRequire(import.meta.url);
 const {JSDOM}=require(process.env.EXTENSION_TEST_JSDOM||'/tmp/blog-assistant-extension-check/node_modules/jsdom');
 const dom=new JSDOM('<button data-name="image">사진</button><input type="file"><button id="other">다른 버튼</button>',{url:'https://blog.naver.com/PostWriteForm.naver?blogId=bluedog129'});
@@ -8,7 +8,11 @@ Object.assign(globalThis,{document:dom.window.document,window:dom.window,locatio
 const input=document.querySelector('input');let blocked=0;
 document.querySelector('[data-name=image]').onclick=()=>input.click();
 input.addEventListener('click',e=>{if(e.defaultPrevented)blocked++;});
-for(let i=0;i<7;i++)openPhotoUpload('bluedog129');
+for(let i=0;i<7;i++){
+ preparePhotoUpload('bluedog129');
+ assert.equal(blocked,i); // Preparing the guard must never click the photo button.
+ document.querySelector('[data-name=image]').click(); // Simulate the subsequent native click.
+}
 assert.equal(blocked,7);
 assert.equal(document.querySelector('#other').dispatchEvent(new dom.window.MouseEvent('click',{bubbles:true,cancelable:true})),true);
 restorePhotoPicker();

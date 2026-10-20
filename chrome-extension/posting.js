@@ -1,5 +1,22 @@
-import {validatePacket,inspectEditor,supplyPhoto,openPhotoUpload,restorePhotoPicker,editorPoint,validateContent,formattingControls,paragraphStyle} from './post-packet.js';
+import {validatePacket,inspectEditor,supplyPhoto,preparePhotoUpload,photoUploadComplete,restorePhotoPicker,editorPoint,validateContent,formattingControls,paragraphStyle} from './post-packet.js';
+import {createPostingDiagnostics,waitForEditor,editorSummary,errorDetails} from './posting-diagnostics.js';
 const $=id=>document.getElementById(id);
+function renderDiagnostics(value){
+ if($('diagnosticLog'))$('diagnosticLog').textContent=JSON.stringify(value,null,2);
+ if($('copyDiagnostics'))$('copyDiagnostics').disabled=false;
+ if($('diagnosticCopyStatus'))$('diagnosticCopyStatus').textContent='';
+}
+const diagnostics=createPostingDiagnostics({
+ save:value=>chrome.storage.local.set?.({lastPostingDiagnostics:value}),
+ render:renderDiagnostics
+});
+void chrome.storage.local.get('lastPostingDiagnostics').then(({lastPostingDiagnostics})=>{
+ if(lastPostingDiagnostics&&!diagnostics.snapshot().startedAt)renderDiagnostics(lastPostingDiagnostics);
+}).catch(()=>{});
+$('copyDiagnostics')?.addEventListener('click',async()=>{
+ try{await navigator.clipboard.writeText($('diagnosticLog').textContent);$('diagnosticCopyStatus').textContent='진단 기록을 복사했습니다.';}
+ catch{$('diagnosticCopyStatus').textContent='복사하지 못했습니다. 아래 기록을 선택해 직접 복사하세요.';}
+});
 let packet=null, files=new Map(), running=false, stopped=false, tabID=null, attached=false;
 let bridgeToken=null, bridgeJob=null, bridgeClaimed=false, reportQueue=Promise.resolve();
 async function bridgeFetch(path, options={}) {
@@ -19,7 +36,7 @@ function check(){if(stopped)throw new Error('중단했습니다. 편집기 탭�
 async function checkActiveJob(){
  check();
  if(!bridgeClaimed)return;
- try{await bridgeFetch(`/jobs/${bridgeJob}/active`);}catch(error){stopped=true;throw new Error('앱 작업이 중단되었거나 연결이 끊겼습니다. 편집기 탭에 입력된 내용은 남아 있습니다.');}
+ try{await bridgeFetch(`/jobs/${bridgeJob}/active`);}catch(error){stopped=true;throw new Error(`앱 작업이 중단되었거나 연결이 끊겼습니다. 편집기 탭에 입력된 내용은 남아 있습니다. 원래 오류: ${error.message}`,{cause:error});}
  check();
 }
 async function execute(func,args){await checkActiveJob();const result=await chrome.scripting.executeScript({target:{tabId:tabID},func,args});return result[0]?.result;}
@@ -77,7 +94,7 @@ async function insertStyledText(paragraphs){
  // Reset before the following paragraph or photo. No marker characters enter the editor.
  await applyStyle(paragraphStyle('body'));
 }
-async function waitFor(test,message,timeout=30000){const start=Date.now();while(Date.now()-start<timeout){check();try{const state=await inspect();if(test(state))return state;}catch(error){if(stopped)throw error;}await delay(400);}throw new Error(message);}
+async function waitFor(test,message,timeout=30000){return waitForEditor({inspect,test,message,timeout,check,isStopped:()=>stopped,delay,record:diagnostics.record});}
 $('files').addEventListener('change',async()=>{
  packet=null;$('start').disabled=true;$('preview').replaceChildren();
  try{
@@ -94,6 +111,8 @@ $('stop').addEventListener('click',()=>{stopped=true;status('중단 요청 중�
 async function runPosting(){
  if(running||!packet)return;
  running=true;stopped=false;$('start').disabled=true;$('files').disabled=true;$('stop').disabled=false;
+ diagnostics.start();
+ diagnostics.stage({stage:'편집기 준비'});
  try{
    await checkActiveJob();
    const tab=await chrome.tabs.create({url:`https://blog.naver.com/PostWriteForm.naver?blogId=${encodeURIComponent(packet.blogID)}&Redirect=Write&categoryNo=${packet.categoryNo}`,active:true});tabID=tab.id;
@@ -106,6 +125,7 @@ async function runPosting(){
    let state=await inspect();
    if(state.title||state.texts.some(t=>t)||state.imageCount)throw new Error('이전 작성 글이 열린 상태입니다. 기존 글을 저장하거나 보관한 뒤 빈 새 글로 다시 시도하세요. 기존 내용을 덮어쓰지 않았습니다.');
    await delay(800);
+   diagnostics.stage({stage:'제목 입력'});
    status('제목 입력 중…');await click(await pointFor('title'));await command('Input.insertText',{text:packet.title});
    await waitFor(s=>normalize(s.title)===normalize(packet.title),'제목 입력을 확인하지 못했습니다.');
    await key('Enter','Enter',13);await delay(400);
@@ -113,38 +133,54 @@ async function runPosting(){
    for(let i=0;i<packet.blocks.length;i++){
      check();const block=packet.blocks[i];status(`본문 입력 ${i+1}/${packet.blocks.length}`);
      if(block.kind==='text'){
+       diagnostics.stage({stage:'본문 입력',blockNumber:i+1,blockTotal:packet.blocks.length});
        if(packet.version===2){await prepareRecordStyle();await insertStyledText(block.paragraphs);}else await insertBodyText(block.text);
        await delay(200);await key('Enter','Enter',13);await key('Enter','Enter',13);
      }else{
+       const photoContext={photoNumber:block.photoNumber,photoTotal:packet.photos.length,blockNumber:i+1,blockTotal:packet.blocks.length};
+       const stage=name=>{diagnostics.stage({...photoContext,stage:name});status(`사진 ${block.photoNumber}/${packet.photos.length} · ${name}`);};
+       stage('업로드 전 상태 조회');
        state=await inspect();const count=state.imageCount;
-       await execute(openPhotoUpload,[packet.blogID]);
+       diagnostics.record('photo-before',{state:editorSummary(state)});
+       stage('사진 추가 버튼 실행');
+       const prepared=await execute(preparePhotoUpload,[packet.blogID]);
+       await click(await pointFor('photo'));
+       diagnostics.record('photo-button-clicked',{method:'trusted-mouse',prepared});
+       stage('사진 입력창 대기');
        await waitFor(s=>s.fileInputCount>0,'사진 선택창을 확인하지 못했습니다.');
+       stage('사진 파일 전달');
        const file=files.get(packet.photos[block.photoNumber-1].filename);
        const bytes=new Uint8Array(await file.arrayBuffer());
        let binary='';for(let n=0;n<bytes.length;n+=32768)binary+=String.fromCharCode(...bytes.subarray(n,n+32768));
        await execute(supplyPhoto,[file.name,btoa(binary)]);
-       await waitFor(s=>s.imageCount===count+1,'사진 업로드가 완료되지 않았습니다. 임시저장은 하지 않았습니다.',90000);
+       stage('사진 업로드 완료 대기');
+       await waitFor(s=>photoUploadComplete(s,count),'사진 업로드 또는 이미지 로딩이 완료되지 않았습니다. 임시저장은 하지 않았습니다.',90000);
+       stage('사진 뒤 입력 위치 복원');
        await key('Escape','Escape',27);await key('ArrowDown','ArrowDown',40);await key('Enter','Enter',13);
        state=await inspect();await click(await pointFor('body'));await key('End','End',35);
      }
    }
+   diagnostics.stage({stage:'본문·사진 검증'});
    state=await inspect();validateContent(state,packet);
    const oldCount=state.temporaryCount;
    status('제목·본문·사진 순서 확인 완료. 임시저장 중…');
+   diagnostics.stage({stage:'임시저장 완료 확인'});
    await click(await pointFor('save'));
    await waitFor(s=>s.saveSignals.some(t=>/저장/.test(t)&&/완료|되었습니다|했/.test(t)) || (s.temporaryCount && s.temporaryCount!==oldCount),'저장 버튼을 눌렀지만 완료를 확인하지 못했습니다. 네이버 편집기에서 임시저장 목록을 확인하세요.',15000);
    await report('success','네이버 임시저장 완료');
+   diagnostics.record('success');
    $('status').textContent='네이버 임시저장 완료. 편집기에서 글과 사진을 확인하세요. 발행은 직접 진행합니다.';
  }catch(error){
-   const value=`중단: ${error.message} 편집기 탭을 확인하세요. 재시도 전 중복 임시저장 여부를 확인하세요.`;
+   diagnostics.record('failure',{error:errorDetails(error)});
+   const value=`중단: ${diagnostics.failureMessage(error)} 편집기 탭을 확인하세요. 재시도 전 중복 임시저장 여부를 확인하세요.`;
    $('status').textContent=value;
    try{await report('failure',value);}catch{}
  }
- finally{try{const result=await chrome.scripting.executeScript({target:{tabId:tabID},func:restorePhotoPicker,args:[]});}catch{}if(attached){try{await chrome.debugger.sendCommand({tabId:tabID},'Page.setInterceptFileChooserDialog',{enabled:false});}catch{}attached=false;try{await chrome.debugger.detach({tabId:tabID});}catch{}}running=false;$('files').disabled=false;$('stop').disabled=true;$('start').disabled=!!bridgeJob||!packet;}
+ finally{try{const result=await chrome.scripting.executeScript({target:{tabId:tabID},func:restorePhotoPicker,args:[]});}catch(error){diagnostics.record('cleanup-error',{operation:'restorePhotoPicker',error:errorDetails(error)});}if(attached){try{await chrome.debugger.sendCommand({tabId:tabID},'Page.setInterceptFileChooserDialog',{enabled:false});}catch(error){diagnostics.record('cleanup-error',{operation:'restoreFileChooser',error:errorDetails(error)});}attached=false;try{await chrome.debugger.detach({tabId:tabID});}catch(error){diagnostics.record('cleanup-error',{operation:'detach',error:errorDetails(error)});}}running=false;$('files').disabled=false;$('stop').disabled=true;$('start').disabled=!!bridgeJob||!packet;await diagnostics.flush();}
 }
 $('start').addEventListener('click',runPosting);
 
-chrome.debugger.onDetach.addListener(source=>{if(running && attached && source.tabId===tabID){stopped=true;status('편집기 제어가 해제되어 중단했습니다.');}});
+chrome.debugger.onDetach.addListener((source,reason)=>{if(running && attached && source.tabId===tabID){diagnostics.record('debugger-detached',{reason});stopped=true;status('편집기 제어가 해제되어 중단했습니다.');}});
 
 async function receiveFromApp(){
  const id=new URL(location.href).searchParams.get('job');

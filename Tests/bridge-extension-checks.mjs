@@ -9,7 +9,7 @@ globalThis.document=dom.window.document;globalThis.location=dom.window.location;
 const packet={type:'blog-assistant.naver-post',version:1,blogID:'bluedog129',categoryNo:'65',title:'테스트 글',blocks:[{kind:'text',text:'첫 문단'},{kind:'photo',photoNumber:1},{kind:'text',text:'감상'}],photos:[{number:1,filename:'01_사진.jpg',caption:'사진'}]};
 const token='a'.repeat(64);
 const reports=[];let claims=0, activeChecks=0, focus=null, detached=null, inspections=0;
-const state={ready:true,title:'',texts:[''],imageCount:0,components:[],fileInputCount:1,saveSignals:[],temporaryCount:'0'};
+const state={ready:true,title:'',texts:[''],imageCount:0,components:[],fileInputCount:0,saveSignals:[],temporaryCount:'0',uploadDiagnostics:{imageReadyCount:0,uploadBusy:false}};
 globalThis.fetch=async(url,options={})=>{
  assert.ok(url.startsWith(`http://127.0.0.1:48765/jobs/${id}/`));
  assert.equal(options.headers['X-Blog-Assistant-Token'],token);
@@ -26,8 +26,8 @@ globalThis.chrome={
    if(func.name==='inspectEditor'){inspections++;return[{result:{...structuredClone(state),recoveryPrompt:inspections<=2}}];}
    if(func.name==='editorPoint'){focus=args[1];return[{result:{x:10,y:10}}];}
    if(func.name==='restorePhotoPicker')return[{result:true}];
-   if(func.name==='openPhotoUpload'){state.fileInputCount=1;return[{result:true}];}
-   if(func.name==='supplyPhoto'){state.fileInputCount=0;state.imageCount++;state.components.push({kind:'photo',text:''});return[{result:true}];}
+   if(func.name==='preparePhotoUpload')return[{result:{fileInputCountBefore:state.fileInputCount}}];
+   if(func.name==='supplyPhoto'){state.fileInputCount=0;state.imageCount++;state.uploadDiagnostics.imageReadyCount=state.imageCount;state.components.push({kind:'photo',text:''});return[{result:true}];}
    throw new Error('Unexpected injected function');
  }},
  debugger:{attach:async()=>{},detach:async()=>{detached?.({tabId:123});},onDetach:{addListener:fn=>{detached=fn;}},sendCommand:async(target,method,params)=>{
@@ -36,6 +36,7 @@ globalThis.chrome={
      else {state.texts.push(params.text);state.components.push({kind:'text',text:params.text});}
    }
    if(method==='Input.dispatchMouseEvent'&&params.type==='mouseReleased'&&focus==='save')state.saveSignals=['임시저장 완료'];
+   if(method==='Input.dispatchMouseEvent'&&params.type==='mouseReleased'&&focus==='photo')state.fileInputCount=1;
  }}
 };
 await import('../chrome-extension/posting.js');
