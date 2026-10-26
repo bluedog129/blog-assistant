@@ -14,13 +14,13 @@ struct PhotoCaptionEntry: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("어떤 사진인가요?").font(.title2.bold())
+            Text(asset.mediaType == .video ? "어떤 영상인가요?" : "어떤 사진인가요?").font(.title2.bold())
             if let date = previousVisitDate {
                 Text("다른 날짜 사진 · \(date.formatted(date: .numeric, time: .omitted))")
                     .font(.callout).foregroundStyle(.secondary)
             }
-            PhotoThumbnail(asset: asset, manager: manager, showFullImage: true)
-                .frame(maxWidth: 360, maxHeight: 330)
+            if asset.mediaType == .video { DraftVideoPreview(asset: asset).frame(maxWidth: 360, maxHeight: 330) }
+            else { PhotoThumbnail(asset: asset, manager: manager, showFullImage: true).frame(maxWidth: 360, maxHeight: 330) }
             TextField("예: 가게 전경, 돈코츠 라멘, 기본 반찬", text: $caption)
                 .textFieldStyle(.roundedBorder).focused($captionFocused)
                 .onSubmit { add() }
@@ -29,7 +29,7 @@ struct PhotoCaptionEntry: View {
             HStack {
                 Button("취소") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("사진 추가") { add() }.buttonStyle(.borderedProminent)
+                Button(asset.mediaType == .video ? "영상 추가" : "사진 추가") { add() }.buttonStyle(.borderedProminent)
                     .disabled(trimmedCaption.isEmpty).keyboardShortcut(.defaultAction)
             }
         }.padding(24).frame(width: 420)

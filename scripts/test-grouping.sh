@@ -18,6 +18,14 @@ swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/DraftPhotos
 .build/grouping-check/photo-sync-tests
 swiftc Sources/BlogAssistant/ReferenceStore.swift Tests/ReferenceStoreChecks.swift -o .build/grouping-check/reference-tests
 .build/grouping-check/reference-tests
+swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/NaverPostPacket.swift Tests/BusinessSummaryChecks.swift -o .build/grouping-check/business-summary-tests
+.build/grouping-check/business-summary-tests
+swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/ReferenceStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/DraftPrompt.swift Sources/BlogAssistant/NaverPostPacket.swift Tests/VideoChecks.swift -o .build/grouping-check/video-tests
+.build/grouping-check/video-tests
+swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/ReferenceStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/DraftPrompt.swift Sources/BlogAssistant/NaverPostPacket.swift Tests/MapLinkChecks.swift -o .build/grouping-check/map-link-tests
+.build/grouping-check/map-link-tests
+swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/ReferenceStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/DraftPrompt.swift Tests/TitleChecks.swift -o .build/grouping-check/title-tests
+.build/grouping-check/title-tests
 swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/ReferenceStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/DraftPrompt.swift Sources/BlogAssistant/DraftStore.swift Sources/BlogAssistant/NaverPostPacket.swift Tests/DraftChecks.swift -o .build/grouping-check/draft-tests
 .build/grouping-check/draft-tests
 swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/NaverPostPacket.swift Sources/BlogAssistant/BridgeConfiguration.swift Sources/BlogAssistant/BridgeHTTP.swift Sources/BlogAssistant/NaverBridge.swift Tests/BridgeChecks.swift -o .build/grouping-check/bridge-tests

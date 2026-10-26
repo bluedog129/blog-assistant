@@ -4,6 +4,8 @@ export function editorSummary(state) {
   return {
     ready: state.ready,
     imageCount: state.imageCount,
+    videoCount: state.videoCount,
+    videoReadyCount: state.videoReadyCount,
     fileInputCount: state.fileInputCount,
     recoveryPrompt: state.recoveryPrompt,
     upload: state.uploadDiagnostics
@@ -37,7 +39,7 @@ export function createPostingDiagnostics({save = async () => {}, render = () => 
     snapshot,
     flush: () => queue,
     failureMessage(error) {
-      const where = [context.photoNumber ? `사진 ${context.photoNumber}/${context.photoTotal}` : '',
+      const where = [context.videoNumber ? `영상 ${context.videoNumber}` : context.photoNumber ? `사진 ${context.photoNumber}/${context.photoTotal}` : '',
         context.blockNumber ? `본문 구간 ${context.blockNumber}/${context.blockTotal}` : '', context.stage].filter(Boolean).join(' · ');
       return `${where ? `[${where}] ` : ''}${String(error?.message || error)}`.slice(0, 2400);
     }

@@ -4,6 +4,9 @@ struct DraftPhoto: Codable, Equatable, Identifiable {
     let id: String
     var caption: String = ""
     var previousVisitDate: Date?
+    var mediaType: String? = nil
+    var isVideo: Bool { mediaType == "video" }
+    func marker(_ number: Int) -> String { "[\(isVideo ? "영상" : "사진") \(number)]" }
 }
 
 struct DraftPhotoPlan: Codable {
@@ -99,10 +102,11 @@ struct DraftBlock: Identifiable, Equatable {
     let id: Int
     let text: String?
     let photoNumber: Int?
+    var isVideo = false
 }
 
 enum DraftLayout {
-    private static let markerPattern = #"(?m)^[ \t]*\[사진[ \t]+([0-9]+)\][ \t]*\r?$"#
+    private static let markerPattern = #"(?m)^[ \t]*\[(사진|영상)[ \t]+([0-9]+)\][ \t]*\r?$"#
     static func blocks(_ text: String) -> [DraftBlock] {
         // Markers occupy a whole line, so prose mentioning a photo is not replaced.
         let regex = try! NSRegularExpression(pattern: markerPattern)
@@ -114,7 +118,7 @@ enum DraftLayout {
                 let part = source.substring(with: NSRange(location: position, length: match.range.location - position)).trimmingCharacters(in: .whitespacesAndNewlines)
                 if !part.isEmpty { result.append(DraftBlock(id: result.count, text: part, photoNumber: nil)) }
             }
-            result.append(DraftBlock(id: result.count, text: nil, photoNumber: Int(source.substring(with: match.range(at: 1))) ?? 0))
+            result.append(DraftBlock(id: result.count, text: nil, photoNumber: Int(source.substring(with: match.range(at: 2))) ?? 0, isVideo: source.substring(with: match.range(at: 1)) == "영상"))
             position = NSMaxRange(match.range)
         }
         let tail = source.substring(from: position).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -134,10 +138,21 @@ enum DraftLayout {
         return result
     }
 
+    static func warnings(text: String, photos: [DraftPhoto]) -> [String] {
+        var result = warnings(text: text, photoCount: photos.count)
+        for block in blocks(text) {
+            guard let number = block.photoNumber, number > 0, number <= photos.count else { continue }
+            if block.isVideo != photos[number - 1].isVideo {
+                result.append("\(number)번은 \(photos[number - 1].isVideo ? "영상" : "사진")입니다. 표시를 \(photos[number - 1].marker(number))로 수정하세요.")
+            }
+        }
+        return result
+    }
+
     // A marker keeps its photo identity when selection order changes.
     static func reconnect(text: String, from old: [DraftPhoto], to selected: [DraftPhoto]) throws -> String {
         guard Set(old.map(\.id)).count == old.count, Set(selected.map(\.id)).count == selected.count,
-              warnings(text: text, photoCount: old.count).isEmpty else {
+              warnings(text: text, photos: old).isEmpty else {
             throw NSError(domain: "DraftLayout", code: 1, userInfo: [NSLocalizedDescriptionKey: "기존 초안의 사진 번호 누락·중복·범위 오류를 먼저 수정하세요. 사진 연결은 변경하지 않았습니다."])
         }
         let numbers = Dictionary(uniqueKeysWithValues: selected.enumerated().map { ($0.element.id, $0.offset + 1) })
@@ -145,13 +160,13 @@ enum DraftLayout {
         let updated = NSMutableString(string: text)
         let regex = try! NSRegularExpression(pattern: markerPattern)
         for match in regex.matches(in: text, range: NSRange(location: 0, length: source.length)).reversed() {
-            let index = Int(source.substring(with: match.range(at: 1)))! - 1
-            let replacement = numbers[old[index].id].map { "[사진 \($0)]" } ?? ""
+            let index = Int(source.substring(with: match.range(at: 2)))! - 1
+            let replacement = numbers[old[index].id].map { selected[$0 - 1].marker($0) } ?? ""
             updated.replaceCharacters(in: match.range, with: replacement)
         }
         let existing = Set(old.map(\.id))
         let newMarkers = selected.enumerated().filter { !existing.contains($0.element.id) }
-            .map { "[사진 \($0.offset + 1)]" }.joined(separator: "\n\n")
+            .map { $0.element.marker($0.offset + 1) }.joined(separator: "\n\n")
         guard !newMarkers.isEmpty else { return updated as String }
         var lines = (updated as String).components(separatedBy: "\n")
         // Keep trailing hashtags at the end of the post.
@@ -177,7 +192,7 @@ enum MenuDraftPhotos {
                     if !result[index].caption.components(separatedBy: " · ").contains(name) {
                         result[index].caption += " · " + name
                     }
-                } else { result.append(DraftPhoto(id: id, caption: name)) }
+                } else { result.append(DraftPhoto(id: id, caption: name, mediaType: review.videoIDs.contains(id) ? "video" : nil)) }
             }
         }
         return result

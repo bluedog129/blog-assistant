@@ -65,7 +65,7 @@ final class PhotoLibraryStore: NSObject, ObservableObject, PHPhotoLibraryChangeO
         let result = PHAsset.fetchAssets(withLocalIdentifiers: Array(Set(identifiers)), options: nil)
         var assets: [PHAsset] = []
         result.enumerateObjects { asset, _, _ in
-            if asset.mediaType == .image { assets.append(asset) }
+            if asset.mediaType == .image || asset.mediaType == .video { assets.append(asset) }
         }
         return assets
     }
@@ -243,7 +243,8 @@ final class PhotoLibraryStore: NSObject, ObservableObject, PHPhotoLibraryChangeO
             let options = PHFetchOptions()
             options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
             options.fetchLimit = limit
-            let result = PHAsset.fetchAssets(with: .image, options: options)
+            options.predicate = NSPredicate(format: "mediaType == %d OR mediaType == %d", PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue)
+            let result = PHAsset.fetchAssets(with: options)
             var grouped: [Date: [PHAsset]] = [:]
             var unknown: [PHAsset] = []
             let calendar = Calendar.current

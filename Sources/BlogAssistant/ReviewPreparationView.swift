@@ -82,12 +82,26 @@ struct ReviewPreparationView: View {
                                 TextEditor(text: $review.visitBackground).frame(minHeight: 65)
                                     .border(Color.secondary.opacity(0.25)).accessibilityLabel("방문 계기")
                                 Button { searchRestaurant() } label: { Label("네이버에서 검색", systemImage: "magnifyingglass") }
+                                mapLinkInput
                                 Text("영업정보 (선택)").font(.headline)
-                                Text("영업시간: 11:00–21:00 / 휴무: 월요일 / 브레이크타임: 15:00–17:00처럼 항목마다 줄을 나누어 입력하세요. 비운 항목은 생략하며, 구분되지 않는 내용도 그대로 보존합니다.")
+                                Text("네이버의 요일별 영업시간을 그대로 붙여넣거나 항목마다 줄을 나눠 입력하세요. 같은 시간의 요일은 묶어 표시하며, 구분이 어려운 내용은 추가 정보로 남깁니다.")
                                     .font(.caption).foregroundStyle(.secondary)
                                 TextEditor(text: $review.businessInfo).frame(minHeight: 110)
                                     .border(Color.secondary.opacity(0.25))
                                     .accessibilityLabel("영업정보")
+                                if !review.businessInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    DisclosureGroup("방문 전 확인 미리보기") {
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            ForEach(Array(BusinessSummary.rows(review.businessInfo).enumerated()), id: \.offset) { _, row in
+                                                VStack(alignment: .leading, spacing: 4) {
+                                                    Text(row.label).font(.subheadline.bold())
+                                                    Text(row.value).font(.callout).textSelection(.enabled)
+                                                        .fixedSize(horizontal: false, vertical: true)
+                                                }.frame(maxWidth: .infinity, alignment: .leading)
+                                            }
+                                        }.padding(10)
+                                    }
+                                }
                                 Text("웨이팅·예약 메모 (선택)").font(.headline)
                                 TextEditor(text: $review.waitingNote).frame(minHeight: 65)
                                     .border(Color.secondary.opacity(0.25)).accessibilityLabel("웨이팅 예약 메모")
@@ -123,7 +137,7 @@ struct ReviewPreparationView: View {
                 }.frame(minWidth: 420)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("방문 사진 · \(visit?.assets.count ?? 0)장").font(.headline)
+                        Text("방문 사진·영상 · \(visit?.assets.count ?? 0)장").font(.headline)
                         if library.canRead, let visit {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 12) {
                                 ForEach(visit.assets, id: \.localIdentifier) { asset in
@@ -154,6 +168,37 @@ struct ReviewPreparationView: View {
         }
     }
 
+    private var mapLinkInput: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("네이버 지도 링크 (선택)").font(.headline)
+            Text("지도에서 매장을 확인하고 공유 링크를 붙여넣으세요. 공유 내용 전체를 복사했다면 ‘링크 붙여넣기’로 주소만 가져올 수 있습니다.")
+                .font(.caption).foregroundStyle(.secondary)
+            TextField("https://naver.me/…", text: $review.naverMapURL)
+                .textFieldStyle(.roundedBorder).accessibilityLabel("네이버 지도 링크")
+            HStack {
+                if let search = NaverMapLink.searchURL(for: review.restaurantName) {
+                    Link("지도에서 매장 찾기", destination: search)
+                }
+                Button("링크 붙여넣기") { pasteMapLink() }
+                if let url = NaverMapLink.url(review.naverMapURL) {
+                    Link("매장 링크 확인", destination: url)
+                }
+            }
+            if !review.naverMapURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, NaverMapLink.url(review.naverMapURL) == nil {
+                Text("네이버 지도·플레이스의 https 주소나 naver.me 공유 링크를 입력하세요.")
+                    .font(.caption).foregroundStyle(.red)
+            }
+        }
+    }
+    private func pasteMapLink() {
+        guard let value = NSPasteboard.general.string(forType: .string) else {
+            errorMessage = "매장의 공유 링크를 먼저 복사하세요."
+            return
+        }
+        do { review.naverMapURL = try NaverMapLink.pastedURL(value); errorMessage = nil }
+        catch { errorMessage = error.localizedDescription }
+    }
+
     private func trimMenuPhotos() {
         let available = Set(review.photoIDs)
         for index in review.menus.indices {
@@ -162,8 +207,8 @@ struct ReviewPreparationView: View {
     }
 
     private func menuPhotos(menuID: String) -> some View {
-        DisclosureGroup("메뉴 사진 · \(review.menus.first { $0.id == menuID }?.photoIDs.count ?? 0)장 (여러 장 선택 가능)") {
-            Text("이 메뉴의 사진을 선택하세요. 메뉴명이 초안의 사진 설명에 자동으로 반영됩니다.")
+        DisclosureGroup("메뉴 사진·영상 · \(review.menus.first { $0.id == menuID }?.photoIDs.count ?? 0)장 (여러 장 선택 가능)") {
+            Text("이 메뉴의 사진·영상을 선택하세요. 메뉴명이 초안의 사진 설명에 자동으로 반영됩니다.")
                 .font(.caption).foregroundStyle(.secondary)
             if library.canRead, let visit {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 10) {
@@ -205,6 +250,7 @@ struct ReviewPreparationView: View {
                 needsConfirmation = !existing.isEmpty
             }
             review.photoIDs = photoIDs
+            review.videoIDs = visit.assets.filter { $0.mediaType == .video }.map(\.localIdentifier).sorted()
             review.restaurantName = name
             trimMenuPhotos()
             baseline = review
@@ -228,8 +274,12 @@ struct ReviewPreparationView: View {
     @discardableResult private func save() -> Bool {
         guard canSave else { return false }
         do {
-            try library.saveReview(review, for: visitID)
-            baseline = review
+            var value = review
+            value.videoIDs = visit?.assets.filter { $0.mediaType == .video }.map(\.localIdentifier).sorted() ?? []
+            value.naverMapURL = try NaverMapLink.normalized(review.naverMapURL)
+            try library.saveReview(value, for: visitID)
+            review = value
+            baseline = value
             needsConfirmation = false
             errorMessage = nil
             savedMessage = "저장 완료 · 나중에 이어서 작성할 수 있습니다."

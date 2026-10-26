@@ -90,8 +90,8 @@ import Foundation
         var styledReview = review
         styledReview.businessInfo = "휴무: 월요일\n영업시간\n화~일 11:00–21:00\n브레이크타임: 15:00–17:00\n\n주차는 매장에 문의"
         let summary = BusinessSummary.rows(styledReview.businessInfo)
-        precondition(summary.map(\.label) == ["영업시간", "휴무", "브레이크타임", "추가 정보"])
-        precondition(summary.first?.value == "화~일 11:00–21:00")
+        precondition(summary.map(\.label) == ["휴무", "영업시간", "브레이크타임", "추가 정보"])
+        precondition(summary.first(where: { $0.label == "영업시간" })?.value == "화–일 11:00–21:00")
         precondition(BusinessSummary.rows(" \n").isEmpty)
         precondition(BusinessSummary.rows("라스트오더:\n").isEmpty)
         precondition(BusinessSummary.rows("휴무: 없음").first?.value == "없음")
@@ -109,7 +109,7 @@ import Foundation
         precondition(plainPacket.version == 1 && plainPacket.blocks.allSatisfy { $0.paragraphs == nil })
         precondition(plainPacket.blocks.compactMap(\.text) == styledPacket.blocks.compactMap(\.text))
         precondition(DraftFormatting.inline("별표 **미완성").map(\.text).joined() == "별표 **미완성")
-        let emptyInfo = DraftFormatting.expandBusinessInfo("도입\n[영업정보]\n감상", review: review)
+        let emptyInfo = DraftFormatting.expandVisitInfo("도입\n[영업정보]\n감상", review: review)
         precondition(!emptyInfo.contains("방문 전 확인") && !emptyInfo.contains("[영업정보]"))
         do { _ = try NaverPostPacket.make(text: "제목\n[영업정보]\n[영업정보]\n본문", photos: [], filenames: [], template: .record, review: styledReview); fatalError("Accepted duplicate business summary") } catch {}
         let decodedPacket = try JSONDecoder().decode(NaverPostPacket.self, from: JSONEncoder().encode(styledPacket))

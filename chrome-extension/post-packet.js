@@ -1,6 +1,7 @@
 export function validatePacket(value, files) {
   const fail = message => { throw new Error(message); };
-  if (value.type !== 'blog-assistant.naver-post' || ![1,2].includes(value.version)) fail('지원되는 임시저장 파일이 아닙니다.');
+  if (value.type !== 'blog-assistant.naver-post' || ![1,2,3].includes(value.version)) fail('지원되는 임시저장 파일이 아닙니다.');
+  if (value.version===3 && value.template!=null && value.template!=='record') fail('지원되는 글 양식이 아닙니다.');
   if (value.version===2 && value.template!=='record') fail('지원되는 글 양식이 아닙니다.');
   if (value.blogID !== 'bluedog129' || value.categoryNo !== '65') fail('대상은 bluedog129의 맛집탐방 카테고리입니다.');
   if (typeof value.title !== 'string' || !value.title.trim() || value.title.length > 200) fail('제목을 확인하세요.');
@@ -8,18 +9,23 @@ export function validatePacket(value, files) {
   const names = new Set();
   for (let i=0;i<value.photos.length;i++) {
     const photo = value.photos[i];
-    if (photo.number !== i+1 || typeof photo.filename !== 'string' || !/^\d+_[^/\\]+\.jpg$/i.test(photo.filename) || names.has(photo.filename)) fail('사진 파일명 또는 번호가 잘못됐습니다.');
+    const video=photo.mediaType==='video';
+    if(photo.mediaType!=null&&!['video','image'].includes(photo.mediaType))fail('미디어 종류를 확인하세요.');
+    if(video&&value.version!==3)fail('영상은 새 확장 프로그램으로 전달하세요.');
+    const filename=video?/^\d+_[^/\\]+\.mp4$/i:/^\d+_[^/\\]+\.jpg$/i;
+    if (photo.number !== i+1 || typeof photo.filename !== 'string' || !filename.test(photo.filename) || names.has(photo.filename)) fail('사진 파일명 또는 번호가 잘못됐습니다.');
     names.add(photo.filename);
     const file = files.get(photo.filename);
-    if (!file || !file.size || file.size > 20_000_000) fail(`사진 파일이 없거나 너무 큽니다: ${photo.filename}`);
+    if (!file || !file.size || file.size > (video?200_000_000:20_000_000)) fail(`사진 파일이 없거나 너무 큽니다: ${photo.filename}`);
   }
+  if(value.photos.filter(p=>p.mediaType==='video').length>10)fail('영상은 한 글에 최대 10개까지 선택하세요.');
   const seen = new Set();
   let textSize=0;
   for (const block of value.blocks) {
     if (block.kind === 'text') {
       if (typeof block.text !== 'string' || !block.text.trim()) fail('본문 텍스트가 비어 있습니다.');
       textSize+=block.text.length;
-      if(value.version===2){
+      if(value.version===2||(value.version===3&&value.template==='record')){
         if(!Array.isArray(block.paragraphs)||!block.paragraphs.length||block.paragraphs.length>10000)fail('글 서식의 문단 구성을 확인하세요.');
         for(const paragraph of block.paragraphs){
           if(!['body','menu','section','price','info'].includes(paragraph.role)||!Array.isArray(paragraph.runs)||paragraph.runs.length>1000)fail('지원되지 않는 글 서식입니다.');
@@ -27,8 +33,9 @@ export function validatePacket(value, files) {
         }
         if(block.paragraphs.map(p=>p.runs.map(r=>r.text).join('')).join('\n')!==block.text)fail('본문과 서식의 내용이 다릅니다.');
       }else if(block.paragraphs)fail('서식이 있는 글은 새 확장 프로그램에서 전달하세요.');
-    } else if (block.kind === 'photo') {
+    } else if (block.kind === 'photo' || block.kind === 'video') {
       if (!Number.isInteger(block.photoNumber) || block.photoNumber<1 || block.photoNumber>value.photos.length || seen.has(block.photoNumber)) fail('본문의 사진 번호가 잘못됐거나 중복입니다.');
+      if((block.kind==='video')!==(value.photos[block.photoNumber-1].mediaType==='video'))fail('사진·영상 표시 종류가 파일과 다릅니다.');
       seen.add(block.photoNumber);
     } else fail('알 수 없는 본문 구성입니다.');
   }
@@ -65,6 +72,21 @@ export function inspectEditor(blogID) {
   const title=document.querySelector('.se-documentTitle');
   const text=[...document.querySelectorAll('.se-component.se-text')];
   const image=[...document.querySelectorAll('.se-component.se-image, .se-component.se-imageGroup')];
+  const videos=[...document.querySelectorAll('.se-component.se-video')];
+  const videoReadyCount=videos.filter(el=>{
+    // The editing canvas renders a thumbnail and duration without a data-module ID.
+    const thumbnail=el.querySelector('.se-module-video .se-video-thumbnail');
+    const duration=el.querySelector('.se-video-time')?.textContent.trim();
+    const uploadedPoster=thumbnail&&/^url\(["']?https:\/\//.test(getComputedStyle(thumbnail).backgroundImage);
+    const renderedVideo=uploadedPoster&&/^(?:\d+:)?\d{1,2}:\d{2}$/.test(duration||'');
+    if(renderedVideo)return true;
+    const nodes=[el,...el.querySelectorAll('[data-module]')];
+    return nodes.some(node=>{try{
+      const data=JSON.parse(node.getAttribute('data-module')||'null');
+      const hasID=value=>value&&typeof value==='object'&&Object.entries(value).some(([key,item])=>((key==='vid'||key.toLowerCase()==='videoid')&&typeof item==='string'&&item.length>0)||hasID(item));
+      return hasID(data);
+    }catch{return false;}})||[...el.querySelectorAll('iframe')].some(frame=>/^https:\/\//.test(frame.getAttribute('src')||''));
+  }).length;
   const buttons=[...document.querySelectorAll('button')];
   const save=buttons.find(b=>b.textContent.trim()==='저장');
   const photoButton=buttons.find(b=>(b.getAttribute('aria-label')||'')==='사진 추가' || b.getAttribute('data-name')==='image');
@@ -93,10 +115,10 @@ export function inspectEditor(blogID) {
     const r=el.getBoundingClientRect();
     return r.width>0 && r.height>0 && /작성\s*중인|작성하던|이어서\s*작성|자동\s*저장된|저장된\s*글을.*불러/.test(el.innerText||'');
   });
-  return {uploadDiagnostics,recoveryPrompt,ready:!!title&&text.length>0,title:clean(title),texts:text.map(clean),imageCount:image.length,
-    components:all.filter(el=>!el.classList.contains('se-documentTitle')).map(el=>({kind:el.classList.contains('se-text')?'text':el.classList.contains('se-image')||el.classList.contains('se-imageGroup')?'photo':'other',text:clean(el),paragraphs:el.classList.contains('se-text')?formatting(el):undefined})),
+  return {uploadDiagnostics,recoveryPrompt,ready:!!title&&text.length>0,title:clean(title),texts:text.map(clean),imageCount:image.length,videoCount:videos.length,videoReadyCount,
+    components:all.filter(el=>!el.classList.contains('se-documentTitle')).map(el=>({kind:el.classList.contains('se-text')?'text':el.classList.contains('se-image')||el.classList.contains('se-imageGroup')?'photo':el.classList.contains('se-video')?'video':'other',text:clean(el),paragraphs:el.classList.contains('se-text')?formatting(el):undefined})),
     titlePoint:point(title?.querySelector('.se-text-paragraph')),bodyPoint:point(text.at(-1)?.querySelector('.se-text-paragraph:last-child')),
-    photoPoint:point(photoButton),savePoint:point(save),fileInputCount:fileInputs.length,
+    photoPoint:point(photoButton),savePoint:point(save),fileInputCount:fileInputs.filter(el=>!el.accept||/image|jpg|jpeg|png/i.test(el.accept)).length,
     saveSignals:[...document.querySelectorAll('[role=status], [role=alert], [class*=toast]')].map(e=>e.textContent.trim()).filter(Boolean),
     temporaryCount:buttons.find(b=>/임시저장된 글 보기/.test(b.getAttribute('aria-label')||''))?.getAttribute('aria-label')};
 }
@@ -129,8 +151,10 @@ export function editorPoint(blogID, kind) {
 export function validateContent(state, packet){
  const normalize=text=>text.replace(/[\u200b\ufeff]/g,'').replace(/\s+/g,' ').trim();
  if(normalize(state.title)!==normalize(packet.title))throw new Error('제목이 원문과 달라 저장을 중단했습니다.');
- if(state.imageCount!==packet.photos.length)throw new Error('사진 개수가 원문과 달라 저장을 중단했습니다.');
- const actual=state.components.filter(b=>b.kind==='photo'||(b.kind==='text'&&normalize(b.text)));
+ if(state.imageCount!==packet.photos.filter(p=>p.mediaType!=='video').length)throw new Error('사진 개수가 원문과 달라 저장을 중단했습니다.');
+ if(Number(state.videoCount||0)!==packet.photos.filter(p=>p.mediaType==='video').length)throw new Error('영상 개수가 원문과 달라 저장을 중단했습니다.');
+ if(packet.photos.some(p=>p.mediaType==='video')&&state.videoReadyCount!==state.videoCount)throw new Error('영상 업로드 완료를 확인하지 못해 저장을 중단했습니다.');
+ const actual=state.components.filter(b=>b.kind==='photo'||b.kind==='video'||(b.kind==='text'&&normalize(b.text)));
  const expected=packet.blocks;
  // Combine adjacent text components, preserving photo positions and all words.
  const compact=blocks=>blocks.reduce((all,b)=>{if(b.kind==='text'&&all.at(-1)?.kind==='text')all.at(-1).text+='\n'+b.text;else all.push({...b});return all;},[]);
@@ -138,7 +162,7 @@ export function validateContent(state, packet){
  if(a.length!==b.length) throw new Error('본문·사진 구간 수가 원문과 다릅니다. 저장하지 않았습니다.');
  const mismatch=a.findIndex((item,i)=>item.kind!==b[i].kind||(item.kind==='text'&&normalize(item.text)!==normalize(b[i].text)));
  if(mismatch>=0) throw new Error(`원문과 다른 구간: ${mismatch+1}/${b.length} (${b[mismatch].kind==='photo'?'사진 위치':'본문'}). 저장하지 않았습니다.`);
- if(packet.version===2)validateFormatting(state,packet);
+ if(packet.version===2||(packet.version===3&&packet.template==='record'))validateFormatting(state,packet);
 }
 
 export function paragraphStyle(role,bold=false){

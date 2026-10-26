@@ -19,8 +19,8 @@ struct BlogDraft: Codable, Identifiable {
         guard let requested = plan.requestPhotos,
               Set(requested.map(\.id)).count == requested.count,
               plan.requestReview == nil || plan.requestReview?.id == reviewID,
-              !DraftLayout.warnings(text: text, photoCount: (photos ?? requested).count).isEmpty,
-              DraftLayout.warnings(text: text, photoCount: requested.count).isEmpty else { return nil }
+              !DraftLayout.warnings(text: text, photos: photos ?? requested).isEmpty,
+              DraftLayout.warnings(text: text, photos: requested).isEmpty else { return nil }
         return BlogDraft(reviewID: reviewID, sourceReview: plan.requestReview ?? sourceReview,
                          referencePostIDs: plan.referencePostIDs ?? referencePostIDs, model: model,
                          createdAt: now, updatedAt: now, text: text, photos: requested, template: template)

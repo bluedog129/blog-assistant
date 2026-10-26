@@ -88,7 +88,7 @@ import SwiftUI
         let id = UUID().uuidString
         job = Job(id: id, folder: folder, packet: packet)
         previousResultUnknown = false
-        busy = true; message = "Chrome에 글과 사진을 전달하는 중…"
+        busy = true; message = "Chrome에 글과 사진·영상을 전달하는 중…"
         defaults.set(true, forKey: "naverBridge.pending")
         // Include Chrome launch time and jobs prepared without opening Chrome.
         timeout = Task { [weak self] in
@@ -139,7 +139,7 @@ import SwiftUI
             guard request.headers["origin"] == origin else { return .text(403, "연결된 확장 프로그램이 아닙니다.") }
             var response = allow(.text(204, ""))
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Blog-Assistant-Token"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Blog-Assistant-Token, Range"
             return response
         }
         guard request.headers["x-blog-assistant-token"] == configuration.token else { return .text(403, "접근이 허용되지 않습니다.") }
@@ -153,9 +153,21 @@ import SwiftUI
         let prefix = "/jobs/\(current.id)"
         if request.method == "POST", request.path == prefix + "/claim" {
             guard !current.claimed else { return allow(.text(409, "이미 전달한 작업입니다. 중복 입력은 하지 않습니다.")) }
-            job?.claimed = true
             job?.lastActivity = Date()
-            return allow(BridgeHTTPResponse(status: 200, body: (try? JSONEncoder().encode(current.packet)) ?? Data(), type: "application/json"))
+            var packet = current.packet
+            for index in packet.photos.indices where packet.photos[index].isVideo {
+                let photo = packet.photos[index]
+                let file = current.folder.appendingPathComponent(photo.filename).resolvingSymlinksInPath()
+                let root = current.folder.resolvingSymlinksInPath().path + "/"
+                guard !photo.filename.contains("/"), !photo.filename.contains("\\"), file.path.hasPrefix(root),
+                      let size = try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber,
+                      size.intValue > 0, size.intValue <= 200_000_000 else {
+                    return allow(.text(400, "영상 파일 경로 또는 크기를 확인하세요."))
+                }
+                packet.photos[index].byteCount = size.intValue
+            }
+            job?.claimed = true
+            return allow(BridgeHTTPResponse(status: 200, body: (try? JSONEncoder().encode(packet)) ?? Data(), type: "application/json"))
         }
         // Check before each editor operation so a cancelled or expired job cannot resume.
         if request.method == "GET", request.path == prefix + "/active", current.claimed {
@@ -164,10 +176,30 @@ import SwiftUI
         }
         if request.method == "GET", request.path.hasPrefix(prefix + "/photos/"), current.claimed,
            let number = Int(request.path.dropFirst((prefix + "/photos/").count)),
-           let photo = current.packet.photos.first(where: { $0.number == number }),
-           let bytes = try? Data(contentsOf: current.folder.appendingPathComponent(photo.filename)) {
+           let photo = current.packet.photos.first(where: { $0.number == number }) {
+            let file = current.folder.appendingPathComponent(photo.filename).resolvingSymlinksInPath()
+            guard !photo.filename.contains("/"), !photo.filename.contains("\\"), file.path.hasPrefix(current.folder.resolvingSymlinksInPath().path + "/") else { return allow(.text(400, "파일 경로 오류")) }
             job?.lastActivity = Date()
-            return allow(BridgeHTTPResponse(status: 200, body: bytes, type: "image/jpeg"))
+            if photo.isVideo {
+                guard let header = request.headers["range"], header.hasPrefix("bytes="),
+                      let size = try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber,
+                      size.intValue > 0, size.intValue <= 200_000_000 else { return allow(.text(416, "영상은 범위를 지정해 요청하세요.")) }
+                let parts = header.dropFirst(6).split(separator: "-", omittingEmptySubsequences: false)
+                guard parts.count == 2, let start = Int(parts[0]), let end = Int(parts[1]), start >= 0, end >= start,
+                      end < size.intValue, end - start < 524_288,
+                      let handle = try? FileHandle(forReadingFrom: file) else { return allow(.text(416, "영상 요청 범위 오류")) }
+                defer { try? handle.close() }
+                do {
+                    try handle.seek(toOffset: UInt64(start))
+                    let data = try handle.read(upToCount: end - start + 1) ?? Data()
+                    guard data.count == end - start + 1 else { return allow(.text(500, "영상 읽기 오류")) }
+                    var response = BridgeHTTPResponse(status: 206, body: data, type: "video/mp4")
+                    response.headers["Content-Range"] = "bytes \(start)-\(end)/\(size.intValue)"
+                    response.headers["Access-Control-Expose-Headers"] = "Content-Range"
+                    return allow(response)
+                } catch { return allow(.text(500, "영상 읽기 오류")) }
+            }
+            if let bytes = try? Data(contentsOf: file) { return allow(BridgeHTTPResponse(status: 200, body: bytes, type: "image/jpeg")) }
         }
         if request.method == "POST", request.path == prefix + "/status", current.claimed {
             struct Status: Decodable { let state: String; let message: String }
@@ -194,7 +226,7 @@ struct ChromeConnectionView: View {
             SecureField("앱 연결 코드", text: $code).textFieldStyle(.roundedBorder)
             Text(bridge.message).font(.caption)
             if let error { Text(error).foregroundStyle(.red).font(.caption) }
-            Text("연결 후에는 초안의 ‘네이버 임시저장’ 버튼으로 글과 사진을 자동 전달합니다. 네이버에 로그인된 Chrome이 필요합니다.").font(.caption)
+            Text("연결 후에는 초안의 ‘네이버 임시저장’ 버튼으로 글과 사진·영상을 자동 전달합니다. 네이버에 로그인된 Chrome이 필요합니다.").font(.caption)
             HStack {
                 Button("연결 해제") { bridge.disconnect() }.disabled(bridge.busy)
                 Button("닫기") { dismiss() }

@@ -1,3 +1,4 @@
+import {inspectVideoUploader,videoUploadPoint,supplyVideoChunk,clearVideoTransfer} from './video-upload.js';
 import {validatePacket,inspectEditor,supplyPhoto,preparePhotoUpload,photoUploadComplete,restorePhotoPicker,editorPoint,validateContent,formattingControls,paragraphStyle} from './post-packet.js';
 import {createPostingDiagnostics,waitForEditor,editorSummary,errorDetails} from './posting-diagnostics.js';
 const $=id=>document.getElementById(id);
@@ -95,16 +96,54 @@ async function insertStyledText(paragraphs){
  await applyStyle(paragraphStyle('body'));
 }
 async function waitFor(test,message,timeout=30000){return waitForEditor({inspect,test,message,timeout,check,isStopped:()=>stopped,delay,record:diagnostics.record});}
+async function waitForVideo(test,message,timeout){
+ const start=Date.now();
+ while(Date.now()-start<timeout){
+   check();const state=await execute(inspectVideoUploader,[packet.blogID]);
+   if(test(state))return state;
+   await delay(500);
+ }
+ throw new Error(message);
+}
+async function uploadVideoFile(file){
+ await command('Page.enable');
+ let timer,listener;
+ const opened=new Promise((resolve,reject)=>{
+   listener=(source,method,params)=>{if(source.tabId===tabID&&method==='Page.fileChooserOpened')resolve(params);};
+   chrome.debugger.onEvent.addListener(listener);
+   timer=setTimeout(()=>reject(new Error('영상 파일 선택창을 확인하지 못했습니다.')),15000);
+ });
+ try{
+   await click(await execute(videoUploadPoint,[packet.blogID,'add']));
+   await opened;
+   const id=crypto.randomUUID();
+   for(let offset=0;offset<file.size;offset+=524288){
+     check();const end=Math.min(file.size,offset+524288);
+     let buffer;
+     if(file.bridgeMediaNumber){
+       const response=await bridgeFetch(`/jobs/${bridgeJob}/photos/${file.bridgeMediaNumber}`,{headers:{Range:`bytes=${offset}-${end-1}`}});
+       if(response.status!==206||response.headers.get('Content-Range')!==`bytes ${offset}-${end-1}/${file.size}`)throw new Error('영상 전달 범위가 맞지 않습니다.');
+       buffer=await response.arrayBuffer();
+     }else buffer=await file.slice(offset,end).arrayBuffer();
+     const bytes=new Uint8Array(buffer);
+     if(bytes.length!==end-offset)throw new Error('영상 조각을 모두 받지 못했습니다.');
+     let binary='';for(let n=0;n<bytes.length;n+=32768)binary+=String.fromCharCode(...bytes.subarray(n,n+32768));
+     await execute(supplyVideoChunk,[id,file.name,file.size,offset,btoa(binary),end===file.size]);
+   }
+ }finally{
+   clearTimeout(timer);chrome.debugger.onEvent.removeListener(listener);
+ }
+}
 $('files').addEventListener('change',async()=>{
  packet=null;$('start').disabled=true;$('preview').replaceChildren();
  try{
    const selected=[...$('files').files];files=new Map();
    for(const file of selected){if(files.has(file.name))throw new Error('같은 이름의 파일을 두 개 선택했습니다.');files.set(file.name,file);}
-   const json=files.get('naver-post.json');if(!json||json.size>1000000)throw new Error('naver-post.json과 사진 파일들을 함께 선택하세요.');
+   const json=files.get('naver-post.json');if(!json||json.size>1000000)throw new Error('naver-post.json과 사진·영상 파일들을 함께 선택하세요.');
    packet=validatePacket(JSON.parse(await json.text()),files);
    const title=document.createElement('h2');title.textContent=packet.title;$('preview').append(title);
-   for(const block of packet.blocks){const p=document.createElement('p');p.textContent=block.kind==='text'?block.text:`[사진 ${block.photoNumber}] ${packet.photos[block.photoNumber-1].caption}`;$('preview').append(p);}
-   status(`bluedog129 / 맛집탐방 · 사진 ${packet.photos.length}장 준비 완료`);$('start').disabled=false;
+   for(const block of packet.blocks){const p=document.createElement('p');p.textContent=block.kind==='text'?block.text:`[${block.kind==='video'?'영상':'사진'} ${block.photoNumber}] ${packet.photos[block.photoNumber-1].caption}`;$('preview').append(p);}
+   status(`bluedog129 / 맛집탐방 · 사진·영상 ${packet.photos.length}개 준비 완료`);$('start').disabled=false;
  }catch(error){status(error.message);}
 });
 $('stop').addEventListener('click',()=>{stopped=true;status('중단 요청 중…');});
@@ -123,7 +162,7 @@ async function runPosting(){
    await chrome.debugger.attach({tabId:tabID},'1.3');attached=true;
    await command('Page.setInterceptFileChooserDialog',{enabled:true});
    let state=await inspect();
-   if(state.title||state.texts.some(t=>t)||state.imageCount)throw new Error('이전 작성 글이 열린 상태입니다. 기존 글을 저장하거나 보관한 뒤 빈 새 글로 다시 시도하세요. 기존 내용을 덮어쓰지 않았습니다.');
+   if(state.title||state.texts.some(t=>t)||state.imageCount||state.videoCount)throw new Error('이전 작성 글이 열린 상태입니다. 기존 글을 저장하거나 보관한 뒤 빈 새 글로 다시 시도하세요. 기존 내용을 덮어쓰지 않았습니다.');
    await delay(800);
    diagnostics.stage({stage:'제목 입력'});
    status('제목 입력 중…');await click(await pointFor('title'));await command('Input.insertText',{text:packet.title});
@@ -134,8 +173,34 @@ async function runPosting(){
      check();const block=packet.blocks[i];status(`본문 입력 ${i+1}/${packet.blocks.length}`);
      if(block.kind==='text'){
        diagnostics.stage({stage:'본문 입력',blockNumber:i+1,blockTotal:packet.blocks.length});
-       if(packet.version===2){await prepareRecordStyle();await insertStyledText(block.paragraphs);}else await insertBodyText(block.text);
+       if(packet.version===2||(packet.version===3&&packet.template==='record')){await prepareRecordStyle();await insertStyledText(block.paragraphs);}else await insertBodyText(block.text);
        await delay(200);await key('Enter','Enter',13);await key('Enter','Enter',13);
+     }else if(block.kind==='video'){
+       const media=packet.photos[block.photoNumber-1];
+       const before=await inspect();
+       const context={videoNumber:block.photoNumber,videoTotal:packet.photos.filter(p=>p.mediaType==='video').length,blockNumber:i+1,blockTotal:packet.blocks.length};
+       const stage=value=>{diagnostics.stage({...context,stage:value});status(`영상 ${block.photoNumber} · ${value}`);};
+       stage('동영상 업로더 열기');
+       await click(await execute(videoUploadPoint,[packet.blogID,'toolbar']));
+       await waitForVideo(s=>s.open&&s.hasAdd,'동영상 업로더를 확인하지 못했습니다.',30000);
+       stage('영상 파일 전달');
+       await uploadVideoFile(files.get(media.filename));
+       stage('영상 업로드 완료 대기');
+       let uploader=await waitForVideo(s=>s.completeEnabled||s.titleEmpty,'영상 업로드가 완료되지 않았습니다.',600000);
+       if(uploader.titleEmpty){
+         await click(await execute(videoUploadPoint,[packet.blogID,'title']));
+         await command('Input.insertText',{text:[...(media.caption||`영상 ${block.photoNumber}`)].slice(0,40).join('')});
+       }
+       await waitForVideo(s=>s.completeEnabled,'영상 정보의 완료 버튼이 활성화되지 않았습니다.',600000);
+       stage('영상 첨부 완료');
+       await click(await execute(videoUploadPoint,[packet.blogID,'complete']));
+       await waitFor(s=>Number(s.videoCount||0)===Number(before.videoCount||0)+1&&Number(s.videoReadyCount||0)===Number(s.videoCount),'영상 첨부 결과를 확인하지 못했습니다.',120000);
+       if((await execute(inspectVideoUploader,[packet.blogID])).open)throw new Error('동영상 업로더가 닫히지 않아 저장을 중단했습니다.');
+       stage('영상 뒤 입력 위치 복원');
+       // The uploader leaves a blank text component after the video. Focus it
+       // directly; Enter on the uploader's old toolbar focus may open a library.
+       await waitFor(s=>s.components?.at(-1)?.kind==='text'&&!!s.bodyPoint,'영상 뒤의 빈 본문 위치를 확인하지 못했습니다.',10000);
+       await click(await pointFor('body'));await key('End','End',35);
      }else{
        const photoContext={photoNumber:block.photoNumber,photoTotal:packet.photos.length,blockNumber:i+1,blockTotal:packet.blocks.length};
        const stage=name=>{diagnostics.stage({...photoContext,stage:name});status(`사진 ${block.photoNumber}/${packet.photos.length} · ${name}`);};
@@ -176,7 +241,7 @@ async function runPosting(){
    $('status').textContent=value;
    try{await report('failure',value);}catch{}
  }
- finally{try{const result=await chrome.scripting.executeScript({target:{tabId:tabID},func:restorePhotoPicker,args:[]});}catch(error){diagnostics.record('cleanup-error',{operation:'restorePhotoPicker',error:errorDetails(error)});}if(attached){try{await chrome.debugger.sendCommand({tabId:tabID},'Page.setInterceptFileChooserDialog',{enabled:false});}catch(error){diagnostics.record('cleanup-error',{operation:'restoreFileChooser',error:errorDetails(error)});}attached=false;try{await chrome.debugger.detach({tabId:tabID});}catch(error){diagnostics.record('cleanup-error',{operation:'detach',error:errorDetails(error)});}}running=false;$('files').disabled=false;$('stop').disabled=true;$('start').disabled=!!bridgeJob||!packet;await diagnostics.flush();}
+ finally{if(tabID){try{await chrome.scripting.executeScript({target:{tabId:tabID},func:clearVideoTransfer,args:[]});}catch{}}try{const result=await chrome.scripting.executeScript({target:{tabId:tabID},func:restorePhotoPicker,args:[]});}catch(error){diagnostics.record('cleanup-error',{operation:'restorePhotoPicker',error:errorDetails(error)});}if(attached){try{await chrome.debugger.sendCommand({tabId:tabID},'Page.setInterceptFileChooserDialog',{enabled:false});}catch(error){diagnostics.record('cleanup-error',{operation:'restoreFileChooser',error:errorDetails(error)});}attached=false;try{await chrome.debugger.detach({tabId:tabID});}catch(error){diagnostics.record('cleanup-error',{operation:'detach',error:errorDetails(error)});}}running=false;$('files').disabled=false;$('stop').disabled=true;$('start').disabled=!!bridgeJob||!packet;await diagnostics.flush();}
 }
 $('start').addEventListener('click',runPosting);
 
@@ -197,6 +262,11 @@ async function receiveFromApp(){
    bridgeClaimed=true;
    files=new Map();
    for(const photo of value.photos){
+     if(photo.mediaType==='video'){
+       if(value.version!==3||!Number.isInteger(photo.byteCount)||photo.byteCount<1||photo.byteCount>200000000)throw new Error('앱의 영상 파일 정보를 확인하지 못했습니다.');
+       files.set(photo.filename,{name:photo.filename,size:photo.byteCount,type:'video/mp4',bridgeMediaNumber:photo.number});
+       continue;
+     }
      const blob=await (await bridgeFetch(`/jobs/${id}/photos/${photo.number}`)).blob();
      files.set(photo.filename,new File([blob],photo.filename,{type:'image/jpeg'}));
    }

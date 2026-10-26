@@ -17,6 +17,7 @@ struct DraftView: View {
     @State private var text = ""
     @State private var baseline = ""
     @State private var photoConnectionChanged = false
+    @State private var mapLinkChanged = false
     @State private var loaded = false
     @State private var loadFailed = false
     @State private var message: String?
@@ -36,7 +37,7 @@ struct DraftView: View {
         initialReview = review
         self.library = library
     }
-    private var dirty: Bool { text != baseline || photoConnectionChanged || template != baselineTemplate }
+    private var dirty: Bool { text != baseline || photoConnectionChanged || mapLinkChanged || template != baselineTemplate }
     private var sourceReview: VisitReview { draft?.sourceReview ?? plan.requestReview ?? review }
     private var assets: [PHAsset] {
         library.assets(for: review.photoIDs).sorted {
@@ -70,7 +71,7 @@ struct DraftView: View {
                     if dirty { closeConfirmation = true } else { dismiss() }
                 }.keyboardShortcut(.cancelAction).disabled(exporting)
             }
-            Text("① 사진 준비 → ② 작성 요청 복사 → ChatGPT에서 생성 → ③ 초안 붙여넣기").font(.callout)
+            Text("① 사진·영상 준비 → ② 작성 요청 복사 → ChatGPT에서 생성 → ③ 초안 붙여넣기").font(.callout)
             HSplitView {
                 photoPreparation.frame(minWidth: 280, idealWidth: 340)
                 VStack(alignment: .leading, spacing: 12) {
@@ -93,16 +94,16 @@ struct DraftView: View {
                     }
                     Text("앱은 AI를 직접 호출하지 않습니다. 복사한 내용을 ChatGPT에 붙여넣고 결과를 가져오세요. 사진 파일은 작성 요청에 포함되지 않습니다.").font(.caption).foregroundStyle(.secondary)
                     if plan.selected.contains(where: { $0.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-                        Text("작성 요청을 복사하려면 선택한 사진의 설명을 입력하세요.").font(.caption).foregroundStyle(.orange)
+                        Text("작성 요청을 복사하려면 선택한 사진·영상의 설명을 입력하세요.").font(.caption).foregroundStyle(.orange)
                     }
                     if let draft, draft.sourceReview != review {
                         Text("초안 작성 후 방문 정보가 바뀌었습니다. 작성 요청을 다시 복사해 생성하거나 글을 수정하세요.").font(.caption).foregroundStyle(.orange)
                     }
                     if let requested = plan.requestPhotos, requested != plan.selected {
-                        Text("사진 구성이 마지막 작성 요청과 다릅니다. 기존 초안의 사진 번호는 유지합니다. 새 구성을 반영하려면 작성 요청을 다시 복사하고 새 초안을 가져오세요.").font(.caption).foregroundStyle(.orange)
+                        Text("사진·영상 구성이 마지막 작성 요청과 다릅니다. 기존 초안의 사진 번호는 유지합니다. 새 구성을 반영하려면 작성 요청을 다시 복사하고 새 초안을 가져오세요.").font(.caption).foregroundStyle(.orange)
                     }
                     if let linked = draft?.photos, linked != plan.selected, plan.requestPhotos == plan.selected {
-                        Text("현재 초안은 이전 사진 구성에 연결되어 있습니다. 새 작성 요청으로 생성한 결과를 붙여넣으면 새 사진 구성으로 연결됩니다.").font(.caption).foregroundStyle(.orange)
+                        Text("현재 초안은 이전 사진·영상 구성에 연결되어 있습니다. 새 작성 요청으로 생성한 결과를 붙여넣으면 새 사진·영상 구성으로 연결됩니다.").font(.caption).foregroundStyle(.orange)
                     }
                     if photoSelectionChanged {
                         HStack {
@@ -123,12 +124,31 @@ struct DraftView: View {
                         Button("초안 저장") { _ = save() }.disabled(!dirty || loadFailed || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             .keyboardShortcut("s", modifiers: .command)
                     }
+                    if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        mapLinkPreparation
+                        DisclosureGroup("제목 다듬기") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(DraftTitle.current(in: text)).font(.headline).textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text("가게명과 대표 메뉴를 중심으로, 실제 감상만 간결하게 담습니다. 제목만 다시 요청한 뒤 결과 한 줄을 붙여넣으세요.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                HStack {
+                                    Button("제목만 다시 요청") { copyTitleRequest() }
+                                        .disabled(!loaded || loadFailed || exporting || bridge.busy || !sourceReview.isReady)
+                                    Button("제목만 붙여넣기") { pasteTitle() }
+                                        .disabled(!loaded || loadFailed || exporting || bridge.busy)
+                                    Text("본문과 사진 위치는 유지됩니다.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }.padding(.vertical, 4)
+                        }
+                    }
                     if preview { draftPreview } else {
                         TextEditor(text: $text).border(Color.secondary.opacity(0.25))
                             .disabled(!loaded || loadFailed).accessibilityLabel("블로그 초안 편집")
                     }
                     if !text.isEmpty {
-                        ForEach(DraftLayout.warnings(text: text, photoCount: displayPhotos.count), id: \.self) {
+                        ForEach(DraftLayout.warnings(text: text, photos: displayPhotos), id: \.self) {
                             Text($0).font(.caption).foregroundStyle(.orange)
                         }
                     }
@@ -137,17 +157,17 @@ struct DraftView: View {
                         Spacer()
                         Button(bridge.busy ? "네이버 입력 중…" : "네이버 임시저장") { sendToNaver() }
                             .buttonStyle(.borderedProminent)
-                            .disabled(exporting || bridge.busy || text.isEmpty || dirty || photoSelectionChanged || loadFailed || !DraftLayout.warnings(text: text, photoCount: displayPhotos.count).isEmpty || !library.canRead)
+                            .disabled(exporting || bridge.busy || text.isEmpty || dirty || photoSelectionChanged || loadFailed || !DraftLayout.warnings(text: text, photos: displayPhotos).isEmpty || !library.canRead)
                         if bridge.busy {
                             Button("작업 중단") { bridge.cancelCurrentJob() }
                         }
-                        Button(exporting ? "사진 내보내는 중…" : "사진만 내보내기") { exportPhotos() }
+                        Button(exporting ? "사진 내보내는 중…" : "사진·영상 내보내기") { exportPhotos() }
                             .disabled(exporting || photoSelectionChanged || displayPhotos.isEmpty || !library.canRead)
                     }
                     Text(bridge.message).font(.caption).foregroundStyle(.secondary)
-                    Text("사진 표시는 별도 줄에 [사진 1] 형식으로 입력하세요. 네이버 임시저장은 이 위치에 사진을 넣고 임시저장까지 진행합니다.").font(.caption).foregroundStyle(.secondary)
+                    Text("별도 줄에 [사진 1], [영상 2]처럼 선택 목록의 번호와 종류를 표시하세요. 네이버 임시저장은 이 위치에 사진을 넣고 임시저장까지 진행합니다.").font(.caption).foregroundStyle(.secondary)
                     if photoSelectionChanged {
-                        Text("현재 선택 \(plan.selected.count)장 · 초안에 연결 \(displayPhotos.count)장. 새 작성 요청으로 초안을 생성하거나 위의 사진 연결 버튼을 누른 뒤 저장하세요.")
+                        Text("현재 선택 \(plan.selected.count)개 · 초안에 연결 \(displayPhotos.count)개. 새 작성 요청으로 초안을 생성하거나 위의 사진 연결 버튼을 누른 뒤 저장하세요.")
                             .font(.caption).foregroundStyle(.orange)
                     }
                 }.padding(.leading, 12).frame(minWidth: 570)
@@ -167,7 +187,7 @@ struct DraftView: View {
                         message = "사진을 추가할 수 없습니다. 사진 권한과 방문 구성을 확인하세요."
                         return
                     }
-                    plan.selected.append(DraftPhoto(id: photo.id, caption: caption, previousVisitDate: photo.previousVisitDate))
+                    plan.selected.append(DraftPhoto(id: photo.id, caption: caption, previousVisitDate: photo.previousVisitDate, mediaType: asset.mediaType == .video ? "video" : nil))
                     persistPlan()
                 }
             } else {
@@ -191,12 +211,50 @@ struct DraftView: View {
         }
     }
 
+    private var mapLinkPreparation: some View {
+        DisclosureGroup("네이버 지도") {
+            VStack(alignment: .leading, spacing: 8) {
+                if let url = NaverMapLink.url(review.naverMapURL) {
+                    Link("저장한 매장 링크 확인", destination: url)
+                    Text("후기의 최신 링크를 본문에 반영합니다. [네이버지도] 위치에 표시하며, 본문과 사진 순서는 유지합니다.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text(sourceReview.naverMapURL.isEmpty ? "후기 작성 준비에서 매장의 공유 링크를 저장하세요." : "후기에 저장된 링크가 없습니다. 반영하면 기존 지도 표시를 제거합니다.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Button("지도 링크 반영") { applyMapLink() }
+                    .disabled(!loaded || loadFailed || exporting || bridge.busy ||
+                              (review.naverMapURL.isEmpty && sourceReview.naverMapURL.isEmpty))
+                Text("본문에 직접 적은 링크는 자동으로 바꾸지 않습니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.padding(.vertical, 4)
+        }
+    }
+    private func applyMapLink() {
+        do {
+            let link = try NaverMapLink.normalized(review.naverMapURL)
+            let updatedText = try DraftMapLink.applying(to: text, url: link)
+            var snapshot = sourceReview
+            snapshot.naverMapURL = link
+            let now = Date()
+            draft = BlogDraft(reviewID: review.id, sourceReview: snapshot,
+                              referencePostIDs: draft?.referencePostIDs ?? plan.referencePostIDs ?? [],
+                              model: draft?.model ?? "직접 작성", createdAt: now, updatedAt: now,
+                              text: updatedText, photos: displayPhotos, template: template)
+            text = updatedText
+            mapLinkChanged = true
+            message = link.isEmpty ? "지도 표시를 제거했습니다. 확인 후 초안 저장을 누르세요." : "최신 지도 링크를 반영했습니다. 미리보기 확인 후 초안 저장을 누르세요."
+        } catch { message = error.localizedDescription }
+    }
+
     private var photoPreparation: some View {
         let mapping = assetMap
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
-                Text("① 사진 선택 · \(plan.selected.count)장").font(.headline)
+                Text("① 사진·영상 선택 · \(plan.selected.count)개").font(.headline)
                 Text("후기에서 저장한 메뉴 사진의 추가·교체·해제와 메뉴명을 반영합니다. 전경·반찬 등 직접 추가한 사진과 직접 편집한 설명은 유지합니다. 선택 순서가 사진 번호입니다.").font(.caption).foregroundStyle(.secondary)
+                Text("영상은 한 글에 최대 10개, 영상당 15분·변환 후 200MB까지 지원합니다. 원본은 유지하고 최대 1080p MP4로 준비합니다.")
+                    .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("후기 사진 다시 반영") { refreshReviewPhotos(includeExcluded: true) }
                     Button("선택 해제") { plan.selected = []; persistPlan() }
@@ -205,7 +263,7 @@ struct DraftView: View {
                     GroupBox {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
-                                Text("사진 \(index + 1)").font(.headline)
+                                Text("\(photo.isVideo ? "영상" : "사진") \(index + 1)").font(.headline)
                                 Spacer()
                                 Button("↑") { movePhoto(index, by: -1) }.disabled(index == 0).accessibilityLabel("사진 위로 이동")
                                 Button("↓") { movePhoto(index, by: 1) }.disabled(index == plan.selected.count - 1).accessibilityLabel("사진 아래로 이동")
@@ -227,11 +285,11 @@ struct DraftView: View {
                         }.padding(4)
                     }
                 }.disabled(!loaded || loadFailed || exporting)
-                Text("선택하지 않은 사진").font(.headline)
+                Text("선택하지 않은 사진·영상").font(.headline)
                 ForEach(assets.filter { asset in !plan.selected.contains { $0.id == asset.localIdentifier } }, id: \.localIdentifier) { asset in
                     HStack {
                         PhotoThumbnail(asset: asset, manager: library.imageManager).frame(width: 110)
-                        Button("추가") { pendingPhoto = DraftPhoto(id: asset.localIdentifier) }
+                        Button("추가") { pendingPhoto = DraftPhoto(id: asset.localIdentifier, mediaType: asset.mediaType == .video ? "video" : nil) }
                     }.disabled(!loaded || loadFailed || exporting)
                 }
                 Divider()
@@ -243,14 +301,15 @@ struct DraftView: View {
         let mapping = assetMap
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
-                ForEach(DraftLayout.blocks(DraftFormatting.expandBusinessInfo(text, review: sourceReview))) { block in
+                ForEach(DraftLayout.blocks(DraftFormatting.expandVisitInfo(text, review: sourceReview))) { block in
                     if let content = block.text { formattedText(content, firstBlock: block.id == 0) }
                     if let number = block.photoNumber {
                         if number > 0, number <= displayPhotos.count {
                             let photo = displayPhotos[number - 1]
                             if let asset = mapping[photo.id] {
-                                PhotoThumbnail(asset: asset, manager: library.imageManager, showFullImage: true).frame(maxWidth: 420)
-                                Text("사진 \(number) · \(photo.caption)").font(.caption).foregroundStyle(.secondary)
+                                if photo.isVideo { DraftVideoPreview(asset: asset).frame(maxWidth: 570) }
+                                else { PhotoThumbnail(asset: asset, manager: library.imageManager, showFullImage: true).frame(maxWidth: 420) }
+                                Text("\(photo.isVideo ? "영상" : "사진") \(number) · \(photo.caption)").font(.caption).foregroundStyle(.secondary)
                                 if let date = photo.previousVisitDate {
                                     Text("다른 날짜 · \(date.formatted(date: .numeric, time: .omitted))")
                                         .font(.caption).foregroundStyle(.secondary)
@@ -271,11 +330,17 @@ struct DraftView: View {
                     Text(DraftFormatting.title(paragraph.text)).font(.title2.bold()).padding(.bottom, 12)
                 } else {
                     let color: Color = paragraph.color == "#003960" ? Color(red: 0, green: 57 / 255, blue: 96 / 255) : (paragraph.role == "price" ? .secondary : .primary)
-                    paragraph.runs.reduce(Text("")) { value, run in
-                        value + Text(run.text).font(.system(size: template == .record ? paragraph.size : 16, weight: template == .record && run.bold ? .bold : .regular))
-                    }.foregroundStyle(template == .record ? color : .primary)
-                        .lineSpacing(5).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let url = NaverMapLink.url(paragraph.text) {
+                        Link(paragraph.text, destination: url)
+                            .font(.system(size: template == .record ? paragraph.size : 16))
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        paragraph.runs.reduce(Text("")) { value, run in
+                            value + Text(run.text).font(.system(size: template == .record ? paragraph.size : 16, weight: template == .record && run.bold ? .bold : .regular))
+                        }.foregroundStyle(template == .record ? color : .primary)
+                            .lineSpacing(5).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
         }.frame(maxWidth: 570, alignment: .leading)
@@ -297,7 +362,7 @@ struct DraftView: View {
             if previousSelection != plan.selected, draft != nil || plan.requestPhotos != nil {
                 message = "후기의 최신 사진 연결을 반영했습니다(새 사진 \(added)장). 기존 초안은 새 작성 요청이나 사진 연결 후 저장으로 반영할 수 있습니다."
             }
-        } catch { loadFailed = true; message = "기존 초안 또는 사진 구성을 읽지 못했습니다. 기존 자료 보호를 위해 저장·가져오기를 중단했습니다." }
+        } catch { loadFailed = true; message = "기존 초안 또는 사진·영상 구성을 읽지 못했습니다. 기존 자료 보호를 위해 저장·가져오기를 중단했습니다." }
         do { references = try ReferenceStore().load() }
         catch { referenceError = "참고 글을 읽지 못했습니다. 참고 글 관리에서 확인하거나 문체 사용을 끄세요." }
         loaded = true
@@ -323,13 +388,13 @@ struct DraftView: View {
             try DraftPhotoPlanStore().save(updatedPlan, reviewID: latest.id)
             updatedReview = latest
             plan = updatedPlan
-            message = "후기에서 저장한 최신 사진 연결을 반영했습니다. 선택 사진 \(plan.selected.count)장입니다."
+            message = "후기에서 저장한 최신 사진 연결을 반영했습니다. 선택 사진 \(plan.selected.count)개입니다."
         } catch { message = "후기 사진을 갱신하지 못했습니다: \(error.localizedDescription)" }
     }
     private func persistPlan() {
         guard !loadFailed else { return }
         do { try DraftPhotoPlanStore().save(plan, reviewID: review.id) }
-        catch { message = "사진 구성을 저장하지 못했습니다: \(error.localizedDescription)" }
+        catch { message = "사진·영상 구성을 저장하지 못했습니다: \(error.localizedDescription)" }
     }
     private func movePhoto(_ index: Int, by offset: Int) {
         let destination = index + offset
@@ -351,7 +416,24 @@ struct DraftView: View {
             try DraftPhotoPlanStore().save(snapshot, reviewID: review.id)
             plan = snapshot; copy(request)
             message = "사진 \(snapshot.selected.count)장을 포함한 작성 요청을 복사했습니다. ChatGPT에 붙여넣고 생성된 글을 가져오세요."
-        } catch { message = "작성 요청의 사진 구성을 저장하지 못했습니다: \(error.localizedDescription)" }
+        } catch { message = "작성 요청의 사진·영상 구성을 저장하지 못했습니다: \(error.localizedDescription)" }
+    }
+    private func copyTitleRequest() {
+        do {
+            let request = try DraftPrompt.titleRequest(review: sourceReview, currentTitle: DraftTitle.current(in: text))
+            copy(request)
+            message = "제목만 다듬는 요청을 복사했습니다. ChatGPT의 결과 한 줄을 복사한 뒤 ‘제목만 붙여넣기’를 누르세요."
+        } catch { message = error.localizedDescription }
+    }
+    private func pasteTitle() {
+        guard let value = NSPasteboard.general.string(forType: .string) else {
+            message = "ChatGPT가 다듬은 제목 한 줄을 먼저 복사하세요."
+            return
+        }
+        do {
+            text = try DraftTitle.replacing(in: text, with: value)
+            message = "제목만 교체했습니다. 본문과 사진 위치는 유지했습니다. 확인 후 초안 저장을 누르세요."
+        } catch { message = error.localizedDescription }
     }
     private func pasteDraft() {
         guard let value = NSPasteboard.general.string(forType: .string), !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -367,7 +449,7 @@ struct DraftView: View {
         draft = BlogDraft(reviewID: review.id, sourceReview: plan.requestReview ?? review,
                           referencePostIDs: plan.referencePostIDs ?? [], model: "ChatGPT 수동 가져오기",
                           createdAt: now, updatedAt: now, text: value, photos: plan.requestPhotos ?? plan.selected)
-        text = value; baseline = ""; replacementText = nil; photoConnectionChanged = false
+        text = value; baseline = ""; replacementText = nil; photoConnectionChanged = false; mapLinkChanged = false
         draft?.template = template
         message = "초안을 가져왔습니다. 사진 미리보기에서 확인한 뒤 저장하세요."
     }
@@ -381,15 +463,15 @@ struct DraftView: View {
         value.text = text; value.updatedAt = now; value.template = template
         do {
             try DraftStore().save(value)
-            draft = value; baseline = text; baselineTemplate = template; photoConnectionChanged = false; message = "초안을 저장했습니다."
+            draft = value; baseline = text; baselineTemplate = template; photoConnectionChanged = false; mapLinkChanged = false; message = "초안을 저장했습니다."
             return true
         } catch { message = "초안을 저장하지 못했습니다: \(error.localizedDescription)"; return false }
     }
     private func connectCurrentPhotos() {
         guard !loadFailed else { return }
-        let adoptingNumbers = !DraftLayout.warnings(text: text, photoCount: displayPhotos.count).isEmpty &&
+        let adoptingNumbers = !DraftLayout.warnings(text: text, photos: displayPhotos).isEmpty &&
             Set(plan.selected.map(\.id)).count == plan.selected.count &&
-            DraftLayout.warnings(text: text, photoCount: plan.selected.count).isEmpty
+            DraftLayout.warnings(text: text, photos: plan.selected).isEmpty
         let updatedText: String
         do {
             if adoptingNumbers {
@@ -411,11 +493,11 @@ struct DraftView: View {
         text = updatedText
         photoConnectionChanged = true
         preview = true
-        message = adoptingNumbers ? "본문의 사진 번호에 현재 선택한 \(plan.selected.count)장을 연결했습니다. 글과 사진 표시의 위치는 유지했습니다. 미리보기 확인 후 초안 저장을 누르세요." : "현재 선택한 \(plan.selected.count)장을 연결했습니다. 새 사진 표시는 본문 끝(해시태그 앞)에 추가했습니다. 사진 위치와 설명을 확인한 뒤 초안 저장을 누르세요."
+        message = adoptingNumbers ? "본문의 사진 번호에 현재 선택한 \(plan.selected.count)개을 연결했습니다. 글과 사진 표시의 위치는 유지했습니다. 미리보기 확인 후 초안 저장을 누르세요." : "현재 선택한 \(plan.selected.count)개을 연결했습니다. 새 사진 표시는 본문 끝(해시태그 앞)에 추가했습니다. 사진 위치와 설명을 확인한 뒤 초안 저장을 누르세요."
     }
     private func exportPhotos(includePost: Bool = false) {
         guard !photoSelectionChanged else {
-            message = "현재 선택한 사진을 초안에 연결한 뒤 내보내세요. 이전 사진 구성은 내보내지 않았습니다."
+            message = "현재 선택한 사진을 초안에 연결한 뒤 내보내세요. 이전 사진·영상 구성은 내보내지 않았습니다."
             return
         }
         if includePost {
@@ -441,7 +523,7 @@ struct DraftView: View {
     }
     private func sendToNaver() {
         guard !photoSelectionChanged else {
-            message = "현재 선택한 사진과 초안의 사진 구성이 다릅니다. 새 초안을 가져오거나 현재 선택한 사진을 초안에 연결한 뒤 저장하세요."
+            message = "현재 선택한 사진과 초안의 사진·영상 구성이 다릅니다. 새 초안을 가져오거나 현재 선택한 사진을 초안에 연결한 뒤 저장하세요."
             return
         }
         guard bridge.ready else { chromeConnectionVisible = true; return }
