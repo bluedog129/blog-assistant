@@ -14,6 +14,12 @@ for(let i=0;i<7;i++){
  document.querySelector('[data-name=image]').click(); // Simulate the subsequent native click.
 }
 assert.equal(blocked,7);
+// Recorded Naver uploader input: photo suppression must not cancel its chooser.
+const video=document.createElement('input');video.type='file';video.id='hidden-input';
+video.accept='.mp4,.avi,.mov,.mpg,.mpeg,.asf,.swf,.wmv,.skm,.k3g,.webm,.mkv,.flv,.3gpp,.mtv';
+document.body.append(video);
+assert.equal(video.dispatchEvent(new dom.window.MouseEvent('click',{bubbles:true,cancelable:true})),true,
+ 'A photo guard left installed must never cancel the following video chooser');
 assert.equal(document.querySelector('#other').dispatchEvent(new dom.window.MouseEvent('click',{bubbles:true,cancelable:true})),true);
 restorePhotoPicker();
 assert.equal(input.dispatchEvent(new dom.window.MouseEvent('click',{bubbles:true,cancelable:true})),true);

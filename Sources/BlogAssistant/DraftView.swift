@@ -32,12 +32,15 @@ struct DraftView: View {
     @AppStorage("preferredDraftTemplate") private var preferredTemplate = DraftTemplate.record.rawValue
     @State private var template = DraftTemplate.record
     @State private var baselineTemplate = DraftTemplate.record
+    @State private var campaign = CampaignGuideRecord()
+    @State private var campaignLoadFailed = false
 
     init(review: VisitReview, library: PhotoLibraryStore) {
         initialReview = review
         self.library = library
     }
-    private var dirty: Bool { text != baseline || photoConnectionChanged || mapLinkChanged || template != baselineTemplate }
+    private var campaignChanged: Bool { !text.isEmpty && draft?.campaignGuide != campaign.guide }
+    private var dirty: Bool { text != baseline || photoConnectionChanged || mapLinkChanged || template != baselineTemplate || campaignChanged }
     private var sourceReview: VisitReview { draft?.sourceReview ?? plan.requestReview ?? review }
     private var assets: [PHAsset] {
         library.assets(for: review.photoIDs).sorted {
@@ -52,10 +55,16 @@ struct DraftView: View {
     }
     private var displayPhotos: [DraftPhoto] { draft?.photos ?? plan.requestPhotos ?? plan.selected }
     private var photoSelectionChanged: Bool { !text.isEmpty && displayPhotos != plan.selected }
-    private var prompt: String { (try? DraftPrompt.make(review: review, references: includeReferences ? references : nil, photos: plan.selected, template: template)) ?? "" }
+    private var prompt: String { (try? DraftPrompt.make(review: review, references: includeReferences ? references : nil, photos: plan.selected, template: template, campaign: campaign.guide)) ?? "" }
+    private var campaignChecks: [CampaignChecklist.Check] {
+        CampaignChecklist.checks(record: campaign, text: text, photos: displayPhotos, review: sourceReview)
+    }
+    private var campaignBlocked: Bool {
+        campaignLoadFailed || campaign.needsReview || campaignChecks.contains { $0.requirement.required && $0.status != .passed }
+    }
     private var canCopyRequest: Bool {
         let mapping = assetMap
-        return loaded && !loadFailed && review.isReady && (!includeReferences || referenceError == nil) &&
+        return loaded && !loadFailed && !campaignLoadFailed && !campaign.needsReview && review.isReady && (!includeReferences || referenceError == nil) &&
         plan.selected.allSatisfy { mapping[$0.id] != nil && !$0.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
@@ -79,9 +88,16 @@ struct DraftView: View {
                     Picker("글 양식", selection: $template) {
                         ForEach(DraftTemplate.allCases) { Text($0.name).tag($0) }
                     }.disabled(exporting || bridge.busy)
-                    Text(template == .record ? "메뉴명 19·볼드 / 본문 16 / 남색 소제목 / 회색 가격. 핵심 구절은 **볼드**, 소제목은 ## 메뉴명으로 표시하세요. 영업정보는 [영업정보] 줄에 자동 표시합니다." : "서식 표시를 제외한 기본 텍스트로 미리보기·전달합니다.")
+                    Text(template == .record ? "메뉴명 19·볼드 / 본문 16 / 소제목 볼드 / 회색 가격. 소제목은 본문과 같은 색을 사용합니다. 핵심 구절은 **볼드**, 소제목은 ## 메뉴명으로 표시하세요. 영업정보는 [영업정보] 줄에 자동 표시합니다." : "서식 표시를 제외한 기본 텍스트로 미리보기·전달합니다.")
                         .font(.caption).foregroundStyle(.secondary)
                     if let referenceError, includeReferences { Text(referenceError).font(.caption).foregroundStyle(.red) }
+                    CampaignGuidePanel(restaurantName: review.restaurantName, record: campaign, checks: campaignChecks,
+                        text: text, photos: displayPhotos, disabled: !loaded || loadFailed || campaignLoadFailed || exporting || bridge.busy,
+                        onSave: saveCampaign)
+                    if campaignChanged {
+                        Text("요구사항이 초안 작성 당시와 다릅니다. 현재 조건으로 다시 확인하고 초안을 저장하거나 작성 요청을 다시 복사하세요.")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
                     DisclosureGroup("ChatGPT에 붙여넣을 내용 확인 · \(prompt.count)자") {
                         ScrollView { Text(prompt).font(.caption).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                             .frame(maxHeight: 140)
@@ -134,7 +150,7 @@ struct DraftView: View {
                                     .font(.caption).foregroundStyle(.secondary)
                                 HStack {
                                     Button("제목만 다시 요청") { copyTitleRequest() }
-                                        .disabled(!loaded || loadFailed || exporting || bridge.busy || !sourceReview.isReady)
+                                        .disabled(!loaded || loadFailed || campaignLoadFailed || campaign.needsReview || exporting || bridge.busy || !sourceReview.isReady)
                                     Button("제목만 붙여넣기") { pasteTitle() }
                                         .disabled(!loaded || loadFailed || exporting || bridge.busy)
                                     Text("본문과 사진 위치는 유지됩니다.")
@@ -157,7 +173,7 @@ struct DraftView: View {
                         Spacer()
                         Button(bridge.busy ? "네이버 입력 중…" : "네이버 임시저장") { sendToNaver() }
                             .buttonStyle(.borderedProminent)
-                            .disabled(exporting || bridge.busy || text.isEmpty || dirty || photoSelectionChanged || loadFailed || !DraftLayout.warnings(text: text, photos: displayPhotos).isEmpty || !library.canRead)
+                            .disabled(exporting || bridge.busy || text.isEmpty || dirty || photoSelectionChanged || loadFailed || campaignBlocked || !DraftLayout.warnings(text: text, photos: displayPhotos).isEmpty || !library.canRead)
                         if bridge.busy {
                             Button("작업 중단") { bridge.cancelCurrentJob() }
                         }
@@ -165,6 +181,10 @@ struct DraftView: View {
                             .disabled(exporting || photoSelectionChanged || displayPhotos.isEmpty || !library.canRead)
                     }
                     Text(bridge.message).font(.caption).foregroundStyle(.secondary)
+                    if !text.isEmpty && campaignBlocked {
+                        Text("네이버 임시저장 전 ‘체험단 요구사항’의 필수 미충족·직접 확인 항목을 확인하세요.")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
                     Text("별도 줄에 [사진 1], [영상 2]처럼 선택 목록의 번호와 종류를 표시하세요. 네이버 임시저장은 이 위치에 사진을 넣고 임시저장까지 진행합니다.").font(.caption).foregroundStyle(.secondary)
                     if photoSelectionChanged {
                         Text("현재 선택 \(plan.selected.count)개 · 초안에 연결 \(displayPhotos.count)개. 새 작성 요청으로 초안을 생성하거나 위의 사진 연결 버튼을 누른 뒤 저장하세요.")
@@ -329,7 +349,7 @@ struct DraftView: View {
                 else if firstBlock && index == 0 {
                     Text(DraftFormatting.title(paragraph.text)).font(.title2.bold()).padding(.bottom, 12)
                 } else {
-                    let color: Color = paragraph.color == "#003960" ? Color(red: 0, green: 57 / 255, blue: 96 / 255) : (paragraph.role == "price" ? .secondary : .primary)
+                    let color: Color = paragraph.role == "price" ? .secondary : .primary
                     if let url = NaverMapLink.url(paragraph.text) {
                         Link(paragraph.text, destination: url)
                             .font(.system(size: template == .record ? paragraph.size : 16))
@@ -365,6 +385,11 @@ struct DraftView: View {
         } catch { loadFailed = true; message = "기존 초안 또는 사진·영상 구성을 읽지 못했습니다. 기존 자료 보호를 위해 저장·가져오기를 중단했습니다." }
         do { references = try ReferenceStore().load() }
         catch { referenceError = "참고 글을 읽지 못했습니다. 참고 글 관리에서 확인하거나 문체 사용을 끄세요." }
+        do { campaign = try CampaignGuideStore().load(reviewID: review.id) }
+        catch {
+            campaignLoadFailed = true
+            message = "체험단 요구사항을 읽지 못했습니다. 기존 자료 보호를 위해 가이드 변경·작성 요청·네이버 전달을 중단했습니다."
+        }
         loaded = true
         repairPhotoConnectionIfNeeded()
     }
@@ -404,15 +429,21 @@ struct DraftView: View {
     private func copy(_ value: String) {
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string)
     }
+    private func saveCampaign(_ value: CampaignGuideRecord) throws {
+        guard !campaignLoadFailed, !loadFailed, !exporting, !bridge.busy else { throw CampaignGuide.invalid("현재는 가이드를 저장할 수 없습니다.") }
+        try CampaignGuideStore().save(value, reviewID: review.id)
+        campaign = value
+    }
     private func copyRequest() {
         guard canCopyRequest else { return }
         var snapshot = plan
         snapshot.syncMenuPhotos(review: review)
         snapshot.requestPhotos = snapshot.selected
         snapshot.requestReview = review
+        snapshot.requestCampaign = campaign.guide
         snapshot.referencePostIDs = includeReferences ? references?.articles.map(\.postID) ?? [] : []
         do {
-            let request = try DraftPrompt.make(review: review, references: includeReferences ? references : nil, photos: snapshot.selected, template: template)
+            let request = try DraftPrompt.make(review: review, references: includeReferences ? references : nil, photos: snapshot.selected, template: template, campaign: campaign.guide)
             try DraftPhotoPlanStore().save(snapshot, reviewID: review.id)
             plan = snapshot; copy(request)
             message = "사진 \(snapshot.selected.count)장을 포함한 작성 요청을 복사했습니다. ChatGPT에 붙여넣고 생성된 글을 가져오세요."
@@ -420,7 +451,7 @@ struct DraftView: View {
     }
     private func copyTitleRequest() {
         do {
-            let request = try DraftPrompt.titleRequest(review: sourceReview, currentTitle: DraftTitle.current(in: text))
+            let request = try DraftPrompt.titleRequest(review: sourceReview, currentTitle: DraftTitle.current(in: text), campaign: campaign.guide)
             copy(request)
             message = "제목만 다듬는 요청을 복사했습니다. ChatGPT의 결과 한 줄을 복사한 뒤 ‘제목만 붙여넣기’를 누르세요."
         } catch { message = error.localizedDescription }
@@ -440,6 +471,9 @@ struct DraftView: View {
             message = "ChatGPT가 작성한 글을 먼저 복사하세요."; return
         }
         guard value.utf8.count <= 1_000_000 else { message = "붙여넣을 내용이 너무 큽니다."; return }
+        guard value.range(of: #""type"\s*:\s*"blog-assistant\.campaign""#, options: .regularExpression) == nil else {
+            message = "가이드 정리 결과는 ‘체험단 요구사항 → 가이드 등록’에서 가져오세요. 여기는 작성된 글을 붙여넣는 곳입니다."; return
+        }
         guard value != prompt, !value.contains("문체 참고 글 JSON:") else { message = "작성 요청이 아닌 ChatGPT의 생성 결과를 복사하세요."; return }
         if !text.isEmpty { replacementText = value; replaceConfirmation = true }
         else { applyPaste(value) }
@@ -451,6 +485,7 @@ struct DraftView: View {
                           createdAt: now, updatedAt: now, text: value, photos: plan.requestPhotos ?? plan.selected)
         text = value; baseline = ""; replacementText = nil; photoConnectionChanged = false; mapLinkChanged = false
         draft?.template = template
+        draft?.campaignGuide = plan.requestCampaign
         message = "초안을 가져왔습니다. 사진 미리보기에서 확인한 뒤 저장하세요."
     }
     @discardableResult private func save() -> Bool {
@@ -460,7 +495,7 @@ struct DraftView: View {
         var value = draft ?? BlogDraft(reviewID: review.id, sourceReview: plan.requestReview ?? review,
                                       referencePostIDs: plan.referencePostIDs ?? [], model: "직접 작성",
                                       createdAt: now, updatedAt: now, text: text, photos: plan.requestPhotos ?? plan.selected)
-        value.text = text; value.updatedAt = now; value.template = template
+        value.text = text; value.updatedAt = now; value.template = template; value.campaignGuide = campaign.guide
         do {
             try DraftStore().save(value)
             draft = value; baseline = text; baselineTemplate = template; photoConnectionChanged = false; mapLinkChanged = false; message = "초안을 저장했습니다."
@@ -501,6 +536,7 @@ struct DraftView: View {
             return
         }
         if includePost {
+            guard !campaignBlocked else { message = "체험단 필수 요구사항을 먼저 확인하세요."; return }
             do { _ = try NaverPostPacket.make(text: text, photos: displayPhotos, filenames: displayPhotos.map { $0.id }, template: template, review: sourceReview) }
             catch { message = error.localizedDescription; return }
         }
@@ -522,6 +558,7 @@ struct DraftView: View {
         }
     }
     private func sendToNaver() {
+        guard !campaignBlocked else { message = "체험단 필수 요구사항을 먼저 확인하세요."; return }
         guard !photoSelectionChanged else {
             message = "현재 선택한 사진과 초안의 사진·영상 구성이 다릅니다. 새 초안을 가져오거나 현재 선택한 사진을 초안에 연결한 뒤 저장하세요."
             return

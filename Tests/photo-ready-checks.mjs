@@ -37,3 +37,39 @@ assert.equal(photoUploadComplete(state,1),false,'Exactly one new component must 
 assert.equal(photoUploadComplete({imageCount:1},0),false,'Missing readiness evidence must never be accepted');
 assert.equal(editorPoint('bluedog129','photo').x,230,'Choose the toolbar, not the duplicate insert-menu button');
 console.log('Passed uploaded-image readiness: placeholders, blob previews, loading/broken images, upload progress, missing evidence and toolbar targeting');
+
+// Previously uploaded photos can return to SVG placeholders during editor redraw.
+// A pending new photo must still block, but an old placeholder must not block it.
+const previousIDs=['uploaded-1','uploaded-2'];
+const redraw={imageCount:3,uploadDiagnostics:{imageReadyCount:2,uploadBusy:false,imageStates:[
+ {id:'uploaded-1',ready:true},{id:'uploaded-2',ready:false},{id:'new-3',ready:true}
+]}};
+assert.equal(photoUploadComplete(redraw,2,previousIDs),true,'Only the newly inserted photo needs fresh readiness evidence');
+const pending=structuredClone(redraw);pending.uploadDiagnostics.imageStates[2].ready=false;
+assert.equal(photoUploadComplete(pending,2,previousIDs),false,'Never accept a pending new photo because older ones loaded');
+const replaced=structuredClone(redraw);replaced.uploadDiagnostics.imageStates[0].id='replacement-1';
+assert.equal(photoUploadComplete(replaced,2,previousIDs),false,'Existing photo identities must be preserved');
+const duplicate=structuredClone(redraw);duplicate.uploadDiagnostics.imageStates[2].id='uploaded-1';
+assert.equal(photoUploadComplete(duplicate,2,previousIDs),false,'Duplicate component identities are not completion evidence');
+const reordered=structuredClone(redraw);reordered.uploadDiagnostics.imageStates.reverse();
+assert.equal(photoUploadComplete(reordered,2,previousIDs),false,'The existing photo order must remain unchanged');
+const noIdentity=structuredClone(redraw);noIdentity.uploadDiagnostics.imageStates[2].id=null;
+assert.equal(photoUploadComplete(noIdentity,2,previousIDs),false);
+assert.equal(photoUploadComplete({...redraw,uploadDiagnostics:{...redraw.uploadDiagnostics,uploadBusy:true}},2,previousIDs),false);
+console.log('Passed per-photo completion across old-image placeholder redraws, pending-new-photo blocking and identity preservation');
+
+// Exercise the real DOM observer, not only a hand-written readiness summary.
+progress.style.display='none';
+const older=document.querySelector('.se-component.se-image');older.setAttribute('data-compid','older');
+img.src='data:image/svg+xml,placeholder';
+const newer=document.createElement('div');newer.className='se-component se-image';newer.setAttribute('data-compid','newer');
+newer.innerHTML='<img class="se-image-resource" src="https://blogfiles.pstatic.net/new.jpg">';
+Object.defineProperties(newer.querySelector('img'),{complete:{value:true},naturalWidth:{value:100}});
+document.querySelector('.se-components-wrap').append(newer);
+const observed=inspectEditor('bluedog129');
+assert.deepEqual(observed.uploadDiagnostics.imageStates,[{id:'older',ready:false},{id:'newer',ready:true}]);
+assert.equal(observed.uploadDiagnostics.imageReadyCount,1);
+assert.equal(photoUploadComplete(observed,1,['older']),true);
+newer.querySelector('img').src='blob:pending';
+assert.equal(photoUploadComplete(inspectEditor('bluedog129'),1,['older']),false);
+console.log('Passed live-shaped DOM component IDs and new-photo-only readiness with a prior SVG placeholder');

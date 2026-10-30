@@ -16,7 +16,7 @@ struct DraftParagraph: Codable, Equatable {
     let runs: [DraftTextRun]
     var text: String { runs.map(\.text).joined() }
     var size: Double { role == "menu" ? 19 : (role == "price" || role == "info" ? 15 : 16) }
-    var color: String { role == "menu" || role == "section" ? "#003960" : (role == "price" ? "#777777" : "#333333") }
+    var color: String { role == "price" ? "#777777" : "#333333" }
 }
 
 // Keep unrecognized information verbatim rather than guessing a schedule.

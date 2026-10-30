@@ -94,16 +94,18 @@ export function inspectEditor(blogID) {
   const visible=el=>{if(!el)return false;const r=el.getBoundingClientRect();const style=getComputedStyle(el);return r.width>0&&r.height>0&&style.visibility!=='hidden'&&style.display!=='none';};
   const buttonState=el=>el?{disabled:el.disabled,ariaDisabled:el.getAttribute('aria-disabled'),visible:visible(el),className:el.className}:null;
   // Image components appear before the upload finishes; blob/data previews are not uploaded photos.
-  const imageReadyCount=image.filter(el=>{
+  const imageStates=image.map(el=>{
     const resources=[...el.querySelectorAll('img.se-image-resource')];
-    return resources.length>0&&resources.every(img=>img.complete&&img.naturalWidth>0&&/^https:\/\//.test(img.currentSrc||img.src));
-  }).length;
+    const ready=resources.length>0&&resources.every(img=>img.complete&&img.naturalWidth>0&&/^https:\/\//.test(img.currentSrc||img.src));
+    return {id:el.getAttribute('data-compid')||el.id||null,ready};
+  });
+  const imageReadyCount=imageStates.filter(item=>item.ready).length;
   const uploadBusy=[...document.querySelectorAll('.se-progressbar')].some(visible);
   const selection=document.getSelection();
   const selectionElement=selection?.anchorNode?.nodeType===1?selection.anchorNode:selection?.anchorNode?.parentElement;
   const selectionComponent=selectionElement?.closest('.se-component');
   const uploadDiagnostics={
-    imageReadyCount,uploadBusy,
+    imageReadyCount,uploadBusy,imageStates,
     documentReady:document.readyState,hasFocus:document.hasFocus(),
     photoButton:buttonState(photoButton),
     fileInputs:fileInputs.slice(0,16).map(el=>({accept:el.accept,multiple:el.multiple,disabled:el.disabled,visible:visible(el),connected:el.isConnected})),
@@ -167,7 +169,7 @@ export function validateContent(state, packet){
 
 export function paragraphStyle(role,bold=false){
  return {size:role==='menu'?19:role==='price'||role==='info'?15:16,
-   color:role==='menu'||role==='section'?'#003960':role==='price'?'#777777':'#333333',bold,font:'nanumgothic'};
+   color:role==='price'?'#777777':'#333333',bold,font:'nanumgothic'};
 }
 
 export function validateFormatting(state,packet){
@@ -207,8 +209,21 @@ export function formattingControls(blogID,name,value){
  return {point:{x:r.left+r.width/2,y:r.top+r.height/2},selected:el.classList.contains('se-is-selected'),text:el.querySelector('.se-toolbar-label')?.textContent.trim(),color:el.querySelector('[data-role="color"]')?.style.backgroundColor};
 }
 
-export function photoUploadComplete(state, previousCount) {
- return state.imageCount===previousCount+1&&state.uploadDiagnostics?.imageReadyCount===previousCount+1&&state.uploadDiagnostics?.uploadBusy===false;
+export function photoUploadComplete(state, previousCount, previousIDs) {
+ if(state.imageCount!==previousCount+1||state.uploadDiagnostics?.uploadBusy!==false)return false;
+ // The editor redraws old uploaded photos as SVG placeholders. Validate the new
+ // component itself instead of requiring every old thumbnail to load again.
+ if(previousIDs!==undefined){
+  const images=state.uploadDiagnostics?.imageStates;
+  if(!Array.isArray(previousIDs)||previousIDs.length!==previousCount||new Set(previousIDs).size!==previousCount||previousIDs.some(id=>typeof id!=='string'||!id))return false;
+  if(!Array.isArray(images)||images.length!==state.imageCount||images.some(item=>typeof item.id!=='string'||!item.id)||new Set(images.map(item=>item.id)).size!==images.length)return false;
+  if(previousIDs.some(id=>!images.some(item=>item.id===id)))return false;
+  if(images.filter(item=>previousIDs.includes(item.id)).some((item,index)=>item.id!==previousIDs[index]))return false;
+  const added=images.filter(item=>!previousIDs.includes(item.id));
+  return added.length===1&&added[0].ready===true;
+ }
+ // Retain the count-only API for earlier callers without component identities.
+ return state.uploadDiagnostics?.imageReadyCount===previousCount+1;
 }
 
 export function preparePhotoUpload(blogID) {
@@ -220,7 +235,11 @@ export function preparePhotoUpload(blogID) {
  // CDP interception alone can leave native chooser requests queued on macOS.
  if (!window.__blogAssistantFileClickGuard) {
    const guard = event => {
-     if (event.target instanceof HTMLInputElement && event.target.type === 'file') event.preventDefault();
+     const input=event.target;
+     if (!(input instanceof HTMLInputElement) || input.type !== 'file') return;
+     const accept=input.getAttribute('accept')||'';
+     // The video uploader needs its own chooser event. Never cancel video-only inputs.
+     if (!accept || /image|jpg|jpeg|png/i.test(accept)) event.preventDefault();
    };
    window.__blogAssistantFileClickGuard = guard;
    document.addEventListener('click', guard, true);

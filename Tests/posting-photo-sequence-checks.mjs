@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {File} from 'node:buffer';
 
 // Run the actual posting module with ten photos. No browser, network or DOM package is needed.
-for(const scenario of ['slow-upload-success','stuck-upload','missing-input-8','inspection-error-8','success']) {
+for(const scenario of ['slow-upload-success','old-placeholder-success','stuck-upload','missing-input-8','inspection-error-8','success']) {
   const elements=new Map();
   const element=()=>({textContent:'',disabled:false,hidden:false,append(){},replaceChildren(){},addEventListener(){}});
   for(const id of ['files','start','stop','status','preview','manualIntro','diagnosticLog'])elements.set(id,element());
@@ -29,6 +29,8 @@ for(const scenario of ['slow-upload-success','stuck-upload','missing-input-8','i
       if(func.name==='inspectEditor'){
         if(pendingPolls>0&&scenario!=='stuck-upload'&&--pendingPolls===0){state.uploadDiagnostics.imageReadyCount=state.imageCount;state.uploadDiagnostics.uploadBusy=false;}
         if(opened===8&&scenario==='inspection-error-8')throw new Error('Editor frame unavailable');
+        state.uploadDiagnostics.imageStates=Array.from({length:state.imageCount},(_,i)=>({id:`component-${i+1}`,ready:scenario==='old-placeholder-success'&&state.imageCount===10?i!==0:i<state.uploadDiagnostics.imageReadyCount}));
+        if(scenario==='old-placeholder-success'&&state.imageCount===10)state.uploadDiagnostics.imageReadyCount=9;
         return [{result:structuredClone(state)}];
       }
       if(func.name==='editorPoint'){focus=args[1];return [{result:{x:1,y:1}}];}
@@ -62,7 +64,7 @@ for(const scenario of ['slow-upload-success','stuck-upload','missing-input-8','i
     for(let n=0;n<30&&(!detached||!saved.at(-1)?.lastPostingDiagnostics.events.some(e=>e.event==='success'||e.event==='failure'));n++)await new Promise(resolve=>setImmediate(resolve));
     const terminal=reports.find(r=>r.state==='failure'||r.state==='success');assert.ok(terminal,scenario);
     assert.equal(detached,true);
-    if(scenario==='success'||scenario==='slow-upload-success'){
+    if(scenario==='success'||scenario==='slow-upload-success'||scenario==='old-placeholder-success'){
       assert.equal(terminal.state,'success');assert.equal(uploads.length,10);assert.equal(saveClicks,1);
     }else if(scenario==='stuck-upload'){
       assert.equal(terminal.state,'failure');assert.match(terminal.message,/사진 1\/10.*사진 업로드 완료 대기/);

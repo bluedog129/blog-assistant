@@ -11,6 +11,7 @@ struct BlogDraft: Codable, Identifiable {
     var text: String
     var photos: [DraftPhoto]? = nil
     var template: DraftTemplate? = nil
+    var campaignGuide: CampaignGuide? = nil
 
     // A direct paste into the editor can replace the text without passing through
     // the import button. Adopt a recorded request only when the old photo list
@@ -23,7 +24,7 @@ struct BlogDraft: Codable, Identifiable {
               DraftLayout.warnings(text: text, photos: requested).isEmpty else { return nil }
         return BlogDraft(reviewID: reviewID, sourceReview: plan.requestReview ?? sourceReview,
                          referencePostIDs: plan.referencePostIDs ?? referencePostIDs, model: model,
-                         createdAt: now, updatedAt: now, text: text, photos: requested, template: template)
+                         createdAt: now, updatedAt: now, text: text, photos: requested, template: template, campaignGuide: plan.requestCampaign)
     }
 }
 

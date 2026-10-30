@@ -106,6 +106,8 @@ async function waitForVideo(test,message,timeout){
  throw new Error(message);
 }
 async function uploadVideoFile(file){
+ // Photo uploads suppress native picker clicks; release that guard before video.
+ await execute(restorePhotoPicker,[]);
  await command('Page.enable');
  let timer,listener;
  const opened=new Promise((resolve,reject)=>{
@@ -206,6 +208,7 @@ async function runPosting(){
        const stage=name=>{diagnostics.stage({...photoContext,stage:name});status(`사진 ${block.photoNumber}/${packet.photos.length} · ${name}`);};
        stage('업로드 전 상태 조회');
        state=await inspect();const count=state.imageCount;
+       const previousPhotoIDs=state.uploadDiagnostics?.imageStates?.map(item=>item.id);
        diagnostics.record('photo-before',{state:editorSummary(state)});
        stage('사진 추가 버튼 실행');
        const prepared=await execute(preparePhotoUpload,[packet.blogID]);
@@ -219,7 +222,8 @@ async function runPosting(){
        let binary='';for(let n=0;n<bytes.length;n+=32768)binary+=String.fromCharCode(...bytes.subarray(n,n+32768));
        await execute(supplyPhoto,[file.name,btoa(binary)]);
        stage('사진 업로드 완료 대기');
-       await waitFor(s=>photoUploadComplete(s,count),'사진 업로드 또는 이미지 로딩이 완료되지 않았습니다. 임시저장은 하지 않았습니다.',90000);
+       await waitFor(s=>photoUploadComplete(s,count,previousPhotoIDs),'사진 업로드 또는 이미지 로딩이 완료되지 않았습니다. 임시저장은 하지 않았습니다.',90000);
+       await execute(restorePhotoPicker,[]);
        stage('사진 뒤 입력 위치 복원');
        await key('Escape','Escape',27);await key('ArrowDown','ArrowDown',40);await key('Enter','Enter',13);
        state=await inspect();await click(await pointFor('body'));await key('End','End',35);

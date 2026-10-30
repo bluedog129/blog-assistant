@@ -13,6 +13,7 @@ struct DraftPhotoPlan: Codable {
     var selected: [DraftPhoto] = []
     var requestPhotos: [DraftPhoto]?
     var requestReview: VisitReview?
+    var requestCampaign: CampaignGuide?
     var referencePostIDs: [String]?
     var visitPhotosSnapshot: [DraftPhoto]?
     var menuPhotosSnapshot: [DraftPhoto]?

@@ -6,7 +6,7 @@ swiftc Sources/BlogAssistant/VisitGrouping.swift Tests/BlogAssistantTests/VisitG
 .build/grouping-check/tests
 swiftc Sources/BlogAssistant/LocationPhotoSearch.swift Tests/LocationPhotoSearchChecks.swift -o .build/grouping-check/location-search-tests
 .build/grouping-check/location-search-tests
-swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/VisitPhotoSelectionStore.swift Tests/VisitPhotoSelectionChecks.swift -o .build/grouping-check/visit-photo-tests
+swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/CampaignGuide.swift Sources/BlogAssistant/VisitPhotoSelectionStore.swift Tests/VisitPhotoSelectionChecks.swift -o .build/grouping-check/visit-photo-tests
 .build/grouping-check/visit-photo-tests
 swiftc Sources/BlogAssistant/VisitNameStore.swift Tests/VisitNameStoreChecks.swift -o .build/grouping-check/name-tests
 .build/grouping-check/name-tests
@@ -14,19 +14,22 @@ swiftc Sources/BlogAssistant/VisitGroupStore.swift Tests/VisitGroupStoreChecks.s
 .build/grouping-check/group-tests
 swiftc Sources/BlogAssistant/ReviewStore.swift Tests/ReviewStoreChecks.swift -o .build/grouping-check/review-tests
 .build/grouping-check/review-tests
-swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/DraftPhotos.swift Tests/DraftPhotoSyncChecks.swift -o .build/grouping-check/photo-sync-tests
+swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/CampaignGuide.swift Tests/DraftPhotoSyncChecks.swift -o .build/grouping-check/photo-sync-tests
 .build/grouping-check/photo-sync-tests
 swiftc Sources/BlogAssistant/ReferenceStore.swift Tests/ReferenceStoreChecks.swift -o .build/grouping-check/reference-tests
 .build/grouping-check/reference-tests
-swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/NaverPostPacket.swift Tests/BusinessSummaryChecks.swift -o .build/grouping-check/business-summary-tests
+swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/CampaignGuide.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/NaverPostPacket.swift Tests/BusinessSummaryChecks.swift -o .build/grouping-check/business-summary-tests
 .build/grouping-check/business-summary-tests
-swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/ReferenceStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/DraftPrompt.swift Sources/BlogAssistant/NaverPostPacket.swift Tests/VideoChecks.swift -o .build/grouping-check/video-tests
+swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/ReferenceStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/CampaignGuide.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/DraftPrompt.swift Sources/BlogAssistant/NaverPostPacket.swift Tests/VideoChecks.swift -o .build/grouping-check/video-tests
 .build/grouping-check/video-tests
-swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/ReferenceStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/DraftPrompt.swift Sources/BlogAssistant/NaverPostPacket.swift Tests/MapLinkChecks.swift -o .build/grouping-check/map-link-tests
+swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/ReferenceStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/CampaignGuide.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/DraftPrompt.swift Sources/BlogAssistant/NaverPostPacket.swift Tests/MapLinkChecks.swift -o .build/grouping-check/map-link-tests
 .build/grouping-check/map-link-tests
-swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/ReferenceStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/DraftPrompt.swift Tests/TitleChecks.swift -o .build/grouping-check/title-tests
+swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/ReferenceStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/CampaignGuide.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/DraftPrompt.swift Tests/TitleChecks.swift -o .build/grouping-check/title-tests
 .build/grouping-check/title-tests
-swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/ReferenceStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/DraftPrompt.swift Sources/BlogAssistant/DraftStore.swift Sources/BlogAssistant/NaverPostPacket.swift Tests/DraftChecks.swift -o .build/grouping-check/draft-tests
+swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/ReferenceStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/CampaignGuide.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/DraftPrompt.swift Sources/BlogAssistant/DraftStore.swift Sources/BlogAssistant/NaverPostPacket.swift Tests/DraftChecks.swift -o .build/grouping-check/draft-tests
 .build/grouping-check/draft-tests
-swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/NaverPostPacket.swift Sources/BlogAssistant/BridgeConfiguration.swift Sources/BlogAssistant/BridgeHTTP.swift Sources/BlogAssistant/NaverBridge.swift Tests/BridgeChecks.swift -o .build/grouping-check/bridge-tests
+swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/CampaignGuide.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/NaverPostPacket.swift Sources/BlogAssistant/BridgeConfiguration.swift Sources/BlogAssistant/BridgeHTTP.swift Sources/BlogAssistant/NaverBridge.swift Tests/BridgeChecks.swift -o .build/grouping-check/bridge-tests
 .build/grouping-check/bridge-tests
+
+swiftc Sources/BlogAssistant/ReviewStore.swift Sources/BlogAssistant/ReferenceStore.swift Sources/BlogAssistant/DraftPhotos.swift Sources/BlogAssistant/DraftTemplate.swift Sources/BlogAssistant/DraftPrompt.swift Sources/BlogAssistant/DraftStore.swift Sources/BlogAssistant/CampaignGuide.swift Sources/BlogAssistant/CampaignChecklist.swift Tests/CampaignGuideChecks.swift -o .build/grouping-check/campaign-tests
+.build/grouping-check/campaign-tests
