@@ -104,13 +104,14 @@ struct DraftBlock: Identifiable, Equatable {
     let text: String?
     let photoNumber: Int?
     var isVideo = false
+    var visitMarker: String? = nil
 }
 
 enum DraftLayout {
     private static let markerPattern = #"(?m)^[ \t]*\[(사진|영상)[ \t]+([0-9]+)\][ \t]*\r?$"#
-    static func blocks(_ text: String) -> [DraftBlock] {
+    static func blocks(_ text: String, visitMarkers: Bool = false) -> [DraftBlock] {
         // Markers occupy a whole line, so prose mentioning a photo is not replaced.
-        let regex = try! NSRegularExpression(pattern: markerPattern)
+        let regex = try! NSRegularExpression(pattern: visitMarkers ? #"(?m)^[ \t]*\[(?:(사진|영상)[ \t]+([0-9]+)|(영업정보|네이버지도))\][ \t]*\r?$"# : markerPattern)
         let source = text as NSString
         var result: [DraftBlock] = []
         var position = 0
@@ -119,7 +120,11 @@ enum DraftLayout {
                 let part = source.substring(with: NSRange(location: position, length: match.range.location - position)).trimmingCharacters(in: .whitespacesAndNewlines)
                 if !part.isEmpty { result.append(DraftBlock(id: result.count, text: part, photoNumber: nil)) }
             }
-            result.append(DraftBlock(id: result.count, text: nil, photoNumber: Int(source.substring(with: match.range(at: 2))) ?? 0, isVideo: source.substring(with: match.range(at: 1)) == "영상"))
+            if visitMarkers, match.range(at: 3).location != NSNotFound {
+                result.append(DraftBlock(id: result.count, text: nil, photoNumber: nil, visitMarker: source.substring(with: match.range(at: 3))))
+            } else {
+                result.append(DraftBlock(id: result.count, text: nil, photoNumber: Int(source.substring(with: match.range(at: 2))) ?? 0, isVideo: source.substring(with: match.range(at: 1)) == "영상"))
+            }
             position = NSMaxRange(match.range)
         }
         let tail = source.substring(from: position).trimmingCharacters(in: .whitespacesAndNewlines)

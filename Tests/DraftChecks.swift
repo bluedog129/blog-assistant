@@ -90,16 +90,16 @@ import Foundation
         var styledReview = review
         styledReview.businessInfo = "휴무: 월요일\n영업시간\n화~일 11:00–21:00\n브레이크타임: 15:00–17:00\n\n주차는 매장에 문의"
         let summary = BusinessSummary.rows(styledReview.businessInfo)
-        precondition(summary.map(\.label) == ["휴무", "영업시간", "브레이크타임", "추가 정보"])
+        precondition(summary.map(\.label) == ["영업시간", "브레이크타임", "휴무", "추가 정보"])
         precondition(summary.first(where: { $0.label == "영업시간" })?.value == "화–일 11:00–21:00")
         precondition(BusinessSummary.rows(" \n").isEmpty)
         precondition(BusinessSummary.rows("라스트오더:\n").isEmpty)
         precondition(BusinessSummary.rows("휴무: 없음").first?.value == "없음")
-        precondition(BusinessSummary.rows("영업시간: 11:00–21:00\n주차: 무료").map(\.label) == ["영업시간", "추가 정보"])
+        precondition(BusinessSummary.rows("영업시간: 11:00–21:00\n주차: 무료").map(\.label) == ["영업시간", "주차"])
         precondition(DraftFormatting.plainText("# 제목\n## 메뉴\n**맛있음**", review: nil) == "제목\n메뉴\n맛있음")
         let styledText = "**제목**\n\n[영업정보]\n\n## 파스타\n가격: 18,000원\n[사진 1]\n**담백한 점**이 좋았어요.\n\n## 먹고 나서\n재방문하고 싶어요."
         let styledPacket = try NaverPostPacket.make(text: styledText, photos: [DraftPhoto(id: "p", caption: "파스타")], filenames: ["01_파스타.jpg"], template: .record, review: styledReview)
-        precondition(styledPacket.version == 2 && styledPacket.template == "record" && styledPacket.title == "제목")
+        precondition(styledPacket.version == 4 && styledPacket.template == "record" && styledPacket.title == "제목")
         let styledParagraphs = styledPacket.blocks.flatMap { $0.paragraphs ?? [] }
         precondition(styledParagraphs.contains { $0.role == "menu" && $0.text == "파스타" && $0.runs.first?.bold == true })
         precondition(styledParagraphs.contains { $0.role == "price" && $0.size == 15 })

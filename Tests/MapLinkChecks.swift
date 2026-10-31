@@ -84,12 +84,20 @@ import Foundation
             precondition(facts["naverMapURL"] as? String == short)
             let packet = try NaverPostPacket.make(text: withMap, photos: [DraftPhoto(id: "private-map-photo", caption: "파스타")], filenames: ["01.jpg"], template: template, review: review)
             let body = packet.blocks.compactMap(\.text).joined(separator: "\n")
-            precondition(body.components(separatedBy: short).count == 2)
-            precondition(body.contains("네이버 지도") && !body.contains("[네이버지도]"))
+            precondition(!body.contains(short) && !body.contains("[네이버지도]"))
+            let maps = packet.blocks.filter { $0.kind == "map" }
+            precondition(packet.version == 4 && maps.count == 1 && maps[0].place?.url == short && maps[0].place?.name == review.restaurantName)
             precondition(packet.blocks.compactMap(\.photoNumber) == [1] && packet.title == "제목")
             let copy = DraftFormatting.plainText(withMap, review: review)
             precondition(copy.contains(short) && !copy.contains("[네이버지도]"))
         }
+        review.businessInfo += "\n주소: 서울 예시로 1"
+        precondition(NaverPostPacket.Place.target(review)?.address == "서울 예시로 1")
+        let mixed = try NaverPostPacket.make(text: "제목\r\n도입\r\n[네이버지도]\r\n[영업정보]\r\n[사진 1]\r\n[영상 2]\r\n감상",
+                                             photos: [DraftPhoto(id: "p", caption: "음식"), DraftPhoto(id: "v", caption: "영상", mediaType: "video")],
+                                             filenames: ["01_음식.jpg", "02_영상.mp4"], template: .record, review: review)
+        precondition(mixed.version == 4 && mixed.blocks.map(\.kind) == ["text", "map", "info", "photo", "video", "text"])
+        precondition(mixed.blocks.compactMap(\.photoNumber) == [1, 2] && mixed.photos[1].isVideo)
         let unusual = "https://map.naver.com/p/entry/place/123?query=one**two**three"
         let paragraph = DraftFormatting.paragraphs(unusual)[0]
         precondition(paragraph.text == unusual && paragraph.runs.count == 1 && !paragraph.runs[0].bold)

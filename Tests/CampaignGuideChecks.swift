@@ -55,6 +55,23 @@ import Foundation
             Dictionary(uniqueKeysWithValues: CampaignChecklist.checks(record: record, text: text, photos: photos, review: review).map { ($0.id, $0) })
         }
         var result = checks()
+        precondition(result[CampaignDisclosure.requirementID]?.status == .missing)
+        let disclosed = CampaignDisclosure.applying(to: text, enabled: true)
+        precondition(CampaignDisclosure.atStart(disclosed))
+        precondition(checks(disclosed)[CampaignDisclosure.requirementID]?.status == .passed)
+        precondition(CampaignDisclosure.applying(to: disclosed, enabled: true) == disclosed)
+        let punctuated = "제목\n\n\(CampaignDisclosure.sentence).\n\n본문"
+        precondition(CampaignDisclosure.applying(to: punctuated, enabled: true) == punctuated)
+        precondition(CampaignDisclosure.applying(to: text, enabled: false) == text)
+        precondition(CampaignDisclosure.applying(to: "", enabled: true).isEmpty)
+        let lateDisclosure = text + "\n\n" + CampaignDisclosure.sentence
+        precondition(!CampaignDisclosure.atStart(lateDisclosure))
+        let moved = CampaignDisclosure.applying(to: lateDisclosure, enabled: true)
+        precondition(moved.components(separatedBy: CampaignDisclosure.sentence).count == 2 && CampaignDisclosure.atStart(moved))
+        let crlf = "제목\r\n\r\n[네이버지도]\r\n[사진 1]\r\n밥은 아쉬웠어요."
+        let crlfDisclosure = CampaignDisclosure.applying(to: crlf, enabled: true)
+        precondition(crlfDisclosure == "제목\r\n\r\n\(CampaignDisclosure.sentence)\r\n\r\n[네이버지도]\r\n[사진 1]\r\n밥은 아쉬웠어요.")
+        precondition(!CampaignDisclosure.atStart("제목\n[사진 1]\n" + CampaignDisclosure.sentence))
         precondition(result["keywords"]?.status == .passed && result["disclosure"]?.status == .passed)
         precondition(result["intro"]?.status == .manual && result["count"]?.status == .passed)
         precondition(result["photo"]?.status == .manual && result["capture"]?.status == .manual)
@@ -91,6 +108,7 @@ import Foundation
         precondition(title.contains("암사동 맛집") && !title.contains("포토존") && !title.contains("업체에서 제공받아 작성했습니다."))
         let ordinaryPrompt = try DraftPrompt.make(review: review, references: nil)
         precondition(!ordinaryPrompt.contains("체험단 작성 조건 (일반 제목"))
+        precondition(writing.contains(CampaignDisclosure.sentence) && !title.contains(CampaignDisclosure.sentence) && !ordinaryPrompt.contains(CampaignDisclosure.sentence))
 
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

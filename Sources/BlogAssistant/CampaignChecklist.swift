@@ -37,7 +37,10 @@ enum CampaignChecklist {
             let normalize: (String) -> String = { $0.precomposedStringWithCanonicalMapping.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).lowercased() }
             return normalize(haystack).contains(normalize(needle))
         }
-        return guide.requirements.map { item in
+        let disclosure = Check(requirement: CampaignDisclosure.requirement,
+            status: trimmed.isEmpty || record.needsReview ? .manual : (CampaignDisclosure.atStart(text) ? .passed : .missing),
+            detail: record.needsReview ? "원문 변경 후 요구사항을 다시 확인·저장하세요." : trimmed.isEmpty ? "초안을 붙여넣으면 검사합니다." : (CampaignDisclosure.atStart(text) ? "본문 첫 줄의 제공 사실 고지를 확인했습니다." : "제목 다음 본문 첫 줄에 공통 고지 문장이 필요합니다."))
+        return [disclosure] + guide.requirements.map { item in
             func result(_ status: Status, _ detail: String) -> Check { Check(requirement: item, status: status, detail: detail) }
             guard !record.needsReview else { return result(.manual, "원문 변경 후 요구사항을 다시 확인·저장하세요.") }
             guard !trimmed.isEmpty else { return result(.manual, "초안을 붙여넣으면 검사합니다.") }

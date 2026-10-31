@@ -13,7 +13,9 @@ struct VisitDetailView: View {
     @State private var destinationID = ""
     @State private var resetConfirmation = false
     @State private var locationSearchVisible = false
-    @State private var additionalPhotoCount = 0
+    @State private var libraryPhotosVisible = false
+    @State private var additionalPhotos: [DraftPhoto] = []
+    private var additionalPhotoCount: Int { additionalPhotos.count }
     @State private var operationError: String?
     private var nameDirty: Bool { name.trimmingCharacters(in: .whitespacesAndNewlines) != originalName }
 
@@ -54,11 +56,13 @@ struct VisitDetailView: View {
                     Text("\(visit.assets.count)장 · 위치 불확실 \(visit.uncertainCount)장")
                         .font(.subheadline).foregroundStyle(.secondary)
                     Spacer()
+                    Button("전체 보관함에서 추가") { libraryPhotosVisible = true }
+                        .disabled(library.isLoading)
                     Button("같은 위치의 다른 날짜 사진 찾기") { locationSearchVisible = true }
                         .disabled(library.isLoading)
                 }
                 if additionalPhotoCount > 0 {
-                    Text("다른 날짜 사진 \(additionalPhotoCount)장 선택됨 · 블로그 초안에 이어집니다.")
+                    Text("추가 사진·영상 \(additionalPhotoCount)개 선택됨 · 원래 그룹을 유지하며 블로그 초안에 이어집니다.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 groupControls(visit)
@@ -66,6 +70,24 @@ struct VisitDetailView: View {
                     Text(operationError).font(.caption).foregroundStyle(.red)
                 }
                 ScrollView {
+                    if !additionalPhotos.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("이 글에 추가 연결한 사진·영상").font(.headline)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 230), spacing: 12)], spacing: 12) {
+                                ForEach(additionalPhotos) { photo in
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        if let asset = library.assets(for: [photo.id]).first {
+                                            PhotoThumbnail(asset: asset, manager: library.imageManager)
+                                            Text(asset.creationDate?.formatted(date: .numeric, time: .shortened) ?? "촬영일 없음").font(.caption)
+                                        } else { Text("사진을 사용할 수 없습니다.").font(.caption).foregroundStyle(.orange) }
+                                        if !photo.caption.isEmpty { Text(photo.caption).font(.caption) }
+                                    }
+                                }
+                            }
+                            Divider()
+                            Text("이번 방문의 원래 사진").font(.headline)
+                        }.padding(.bottom, 12)
+                    }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 190, maximum: 280), spacing: 16)], spacing: 16) {
                         ForEach(visit.assets, id: \.localIdentifier) { asset in
                             VStack(alignment: .leading, spacing: 8) {
@@ -100,6 +122,9 @@ struct VisitDetailView: View {
                 VisitLocationPhotosView(sourcePhotoIDs: visit.assets.map(\.localIdentifier), library: library)
             }
         }
+        .sheet(isPresented: $libraryPhotosVisible, onDismiss: { loadAdditionalPhotoCount() }) {
+            if let visit { VisitLibraryPhotosView(sourcePhotoIDs: visit.assets.map(\.localIdentifier), library: library) }
+        }
         .interactiveDismissDisabled(name.trimmingCharacters(in: .whitespacesAndNewlines) != originalName)
         .confirmationDialog("저장하지 않은 음식점명 변경을 버릴까요?", isPresented: $confirmDiscard, titleVisibility: .visible) {
             Button("변경 버리고 닫기", role: .destructive) { dismiss() }
@@ -120,8 +145,8 @@ struct VisitDetailView: View {
     }
 
     private func loadAdditionalPhotoCount() {
-        guard let visit else { additionalPhotoCount = 0; return }
-        do { additionalPhotoCount = try VisitPhotoSelectionStore().load(sourcePhotoIDs: visit.assets.map(\.localIdentifier)).count }
+        guard let visit else { additionalPhotos = []; return }
+        do { additionalPhotos = try VisitPhotoSelectionStore().load(sourcePhotoIDs: visit.assets.map(\.localIdentifier)) }
         catch { operationError = "추가 사진 기록을 읽지 못했습니다. 기존 자료는 유지됩니다." }
     }
 

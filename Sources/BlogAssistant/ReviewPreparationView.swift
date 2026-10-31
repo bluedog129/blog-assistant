@@ -84,22 +84,24 @@ struct ReviewPreparationView: View {
                                 Button { searchRestaurant() } label: { Label("네이버에서 검색", systemImage: "magnifyingglass") }
                                 mapLinkInput
                                 Text("영업정보 (선택)").font(.headline)
-                                Text("네이버의 요일별 영업시간을 그대로 붙여넣거나 항목마다 줄을 나눠 입력하세요. 같은 시간의 요일은 묶어 표시하며, 구분이 어려운 내용은 추가 정보로 남깁니다.")
+                                Text("요일별 영업시간을 붙여넣고 ‘주소: …’, ‘전화번호: …’, ‘주차: …’를 줄마다 입력하세요. 주소는 지도에서 확인한 매장 주소를 사용하세요. 같은 시간의 요일을 묶어 간결한 정보 블록으로 표시하며, 체험단 방문시간은 영업시간과 구분합니다.")
                                     .font(.caption).foregroundStyle(.secondary)
                                 TextEditor(text: $review.businessInfo).frame(minHeight: 110)
                                     .border(Color.secondary.opacity(0.25))
                                     .accessibilityLabel("영업정보")
                                 if !review.businessInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                     DisclosureGroup("방문 전 확인 미리보기") {
-                                        VStack(alignment: .leading, spacing: 12) {
-                                            ForEach(Array(BusinessSummary.rows(review.businessInfo).enumerated()), id: \.offset) { _, row in
-                                                VStack(alignment: .leading, spacing: 4) {
-                                                    Text(row.label).font(.subheadline.bold())
-                                                    Text(row.value).font(.callout).textSelection(.enabled)
-                                                        .fixedSize(horizontal: false, vertical: true)
-                                                }.frame(maxWidth: .infinity, alignment: .leading)
-                                            }
-                                        }.padding(10)
+                                        HStack(alignment: .top, spacing: 12) {
+                                            Rectangle().fill(Color.secondary).frame(width: 4)
+                                            VStack(alignment: .leading, spacing: 6) {
+                                                ForEach(Array(BusinessSummary.paragraphs(review.businessInfo).enumerated()), id: \.offset) { _, paragraph in
+                                                    paragraph.runs.reduce(Text("")) { value, run in
+                                                        value + Text(run.text).font(.system(size: 15, weight: run.bold ? .bold : .regular))
+                                                    }.textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                                }
+                                            }.padding(.vertical, 4)
+                                        }.fixedSize(horizontal: false, vertical: true).padding(10)
                                     }
                                 }
                                 Text("웨이팅·예약 메모 (선택)").font(.headline)

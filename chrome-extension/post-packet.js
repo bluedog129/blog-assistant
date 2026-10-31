@@ -1,7 +1,9 @@
+import {validatePlace} from './visit-blocks.js';
+
 export function validatePacket(value, files) {
   const fail = message => { throw new Error(message); };
-  if (value.type !== 'blog-assistant.naver-post' || ![1,2,3].includes(value.version)) fail('지원되는 임시저장 파일이 아닙니다.');
-  if (value.version===3 && value.template!=null && value.template!=='record') fail('지원되는 글 양식이 아닙니다.');
+  if (value.type !== 'blog-assistant.naver-post' || ![1,2,3,4].includes(value.version)) fail('지원되는 임시저장 파일이 아닙니다.');
+  if (value.version>=3 && value.template!=null && value.template!=='record') fail('지원되는 글 양식이 아닙니다.');
   if (value.version===2 && value.template!=='record') fail('지원되는 글 양식이 아닙니다.');
   if (value.blogID !== 'bluedog129' || value.categoryNo !== '65') fail('대상은 bluedog129의 맛집탐방 카테고리입니다.');
   if (typeof value.title !== 'string' || !value.title.trim() || value.title.length > 200) fail('제목을 확인하세요.');
@@ -11,7 +13,7 @@ export function validatePacket(value, files) {
     const photo = value.photos[i];
     const video=photo.mediaType==='video';
     if(photo.mediaType!=null&&!['video','image'].includes(photo.mediaType))fail('미디어 종류를 확인하세요.');
-    if(video&&value.version!==3)fail('영상은 새 확장 프로그램으로 전달하세요.');
+    if(video&&value.version<3)fail('영상은 새 확장 프로그램으로 전달하세요.');
     const filename=video?/^\d+_[^/\\]+\.mp4$/i:/^\d+_[^/\\]+\.jpg$/i;
     if (photo.number !== i+1 || typeof photo.filename !== 'string' || !filename.test(photo.filename) || names.has(photo.filename)) fail('사진 파일명 또는 번호가 잘못됐습니다.');
     names.add(photo.filename);
@@ -22,13 +24,20 @@ export function validatePacket(value, files) {
   const seen = new Set();
   let textSize=0;
   for (const block of value.blocks) {
-    if (block.kind === 'text') {
+    if(block.kind==='map'){
+      if(value.version!==4||!block.place||typeof block.place.name!=='string'||!block.place.name.trim()||block.place.name.length>200||typeof block.place.address!=='string'||block.place.address.length>500||/[\r\n]/.test(block.place.name+block.place.address))fail('장소 지도 정보를 확인하세요.');
+      if(typeof block.place.url!=='string'||block.place.url.length>2048)fail('장소 지도 링크를 확인하세요.');
+      let url;try{url=new URL(block.place.url);}catch{fail('장소 지도 링크를 확인하세요.');}
+      if(url.protocol!=='https:'||!['naver.me','map.naver.com','m.place.naver.com','pcmap.place.naver.com'].includes(url.hostname)||url.username||url.password||url.port||url.pathname==='/')fail('장소 지도 링크를 확인하세요.');
+      if(block.text!=null||block.photoNumber!=null||block.paragraphs!=null)fail('장소 지도 블록 구성이 잘못됐습니다.');
+    }else if (block.kind === 'text'||block.kind==='info') {
+      if(block.kind==='info'&&(value.version!==4||value.template!=='record'))fail('방문정보는 새 확장 프로그램의 단정한 기록 양식으로 전달하세요.');
       if (typeof block.text !== 'string' || !block.text.trim()) fail('본문 텍스트가 비어 있습니다.');
       textSize+=block.text.length;
-      if(value.version===2||(value.version===3&&value.template==='record')){
+      if(value.version===2||(value.version>=3&&value.template==='record')){
         if(!Array.isArray(block.paragraphs)||!block.paragraphs.length||block.paragraphs.length>10000)fail('글 서식의 문단 구성을 확인하세요.');
         for(const paragraph of block.paragraphs){
-          if(!['body','menu','section','price','info'].includes(paragraph.role)||!Array.isArray(paragraph.runs)||paragraph.runs.length>1000)fail('지원되지 않는 글 서식입니다.');
+          if(!['body','menu','section','price','info'].includes(paragraph.role)||!Array.isArray(paragraph.runs)||paragraph.runs.length>1000||(block.kind==='info'&&paragraph.role!=='info'))fail('지원되지 않는 글 서식입니다.');
           for(const run of paragraph.runs)if(typeof run.text!=='string'||!run.text.length||/[\r\n]/.test(run.text)||typeof run.bold!=='boolean')fail('강조 구절을 확인하세요.');
         }
         if(block.paragraphs.map(p=>p.runs.map(r=>r.text).join('')).join('\n')!==block.text)fail('본문과 서식의 내용이 다릅니다.');
@@ -39,6 +48,7 @@ export function validatePacket(value, files) {
       seen.add(block.photoNumber);
     } else fail('알 수 없는 본문 구성입니다.');
   }
+  if(value.blocks.filter(b=>b.kind==='map').length>1||value.blocks.filter(b=>b.kind==='info').length>1)fail('장소 지도와 방문정보는 한 번씩만 넣으세요.');
   if (!textSize || textSize>500000 || seen.size!==value.photos.length) fail('본문 크기 또는 누락된 사진 번호를 확인하세요.');
   return value;
 }
@@ -71,6 +81,11 @@ export function inspectEditor(blogID) {
   });
   const title=document.querySelector('.se-documentTitle');
   const text=[...document.querySelectorAll('.se-component.se-text')];
+  const maps=[...document.querySelectorAll('.se-component.se-placesMap')];
+  const place=el=>{
+    const img=el.querySelector('.se-module-map-image img.se-map-image');
+    return {name:el.querySelector('.se-map-title')?.textContent.trim()||'',address:el.querySelector('.se-map-address')?.textContent.trim()||'',ready:el.querySelectorAll('.se-map-title').length===1&&el.querySelectorAll('.se-map-address').length===1&&!!img&&img.complete&&img.naturalWidth>0&&/^https:\/\//.test(img.currentSrc||img.src)};
+  };
   const image=[...document.querySelectorAll('.se-component.se-image, .se-component.se-imageGroup')];
   const videos=[...document.querySelectorAll('.se-component.se-video')];
   const videoReadyCount=videos.filter(el=>{
@@ -117,8 +132,11 @@ export function inspectEditor(blogID) {
     const r=el.getBoundingClientRect();
     return r.width>0 && r.height>0 && /작성\s*중인|작성하던|이어서\s*작성|자동\s*저장된|저장된\s*글을.*불러/.test(el.innerText||'');
   });
-  return {uploadDiagnostics,recoveryPrompt,ready:!!title&&text.length>0,title:clean(title),texts:text.map(clean),imageCount:image.length,videoCount:videos.length,videoReadyCount,
-    components:all.filter(el=>!el.classList.contains('se-documentTitle')).map(el=>({kind:el.classList.contains('se-text')?'text':el.classList.contains('se-image')||el.classList.contains('se-imageGroup')?'photo':el.classList.contains('se-video')?'video':'other',text:clean(el),paragraphs:el.classList.contains('se-text')?formatting(el):undefined})),
+  return {uploadDiagnostics,recoveryPrompt,ready:!!title&&text.length>0,title:clean(title),texts:text.map(clean),imageCount:image.length,videoCount:videos.length,videoReadyCount,mapCount:maps.length,
+    components:all.filter(el=>!el.classList.contains('se-documentTitle')).map(el=>{
+      const info=el.classList.contains('se-quotation');const content=info?el.querySelector('.se-quote'):el;
+      return {kind:el.classList.contains('se-placesMap')?'map':info?'info':el.classList.contains('se-text')?'text':el.classList.contains('se-image')||el.classList.contains('se-imageGroup')?'photo':el.classList.contains('se-video')?'video':'other',text:clean(content),paragraphs:el.classList.contains('se-text')||info?formatting(content):undefined,place:el.classList.contains('se-placesMap')?place(el):undefined,infoStyle:info&&el.classList.contains('se-l-quotation_line')?'line':undefined};
+    }),
     titlePoint:point(title?.querySelector('.se-text-paragraph')),bodyPoint:point(text.at(-1)?.querySelector('.se-text-paragraph:last-child')),
     photoPoint:point(photoButton),savePoint:point(save),fileInputCount:fileInputs.filter(el=>!el.accept||/image|jpg|jpeg|png/i.test(el.accept)).length,
     saveSignals:[...document.querySelectorAll('[role=status], [role=alert], [class*=toast]')].map(e=>e.textContent.trim()).filter(Boolean),
@@ -155,16 +173,18 @@ export function validateContent(state, packet){
  if(normalize(state.title)!==normalize(packet.title))throw new Error('제목이 원문과 달라 저장을 중단했습니다.');
  if(state.imageCount!==packet.photos.filter(p=>p.mediaType!=='video').length)throw new Error('사진 개수가 원문과 달라 저장을 중단했습니다.');
  if(Number(state.videoCount||0)!==packet.photos.filter(p=>p.mediaType==='video').length)throw new Error('영상 개수가 원문과 달라 저장을 중단했습니다.');
+ if(Number(state.mapCount||0)!==packet.blocks.filter(b=>b.kind==='map').length)throw new Error('장소 지도 개수가 다릅니다. 저장하지 않았습니다.');
  if(packet.photos.some(p=>p.mediaType==='video')&&state.videoReadyCount!==state.videoCount)throw new Error('영상 업로드 완료를 확인하지 못해 저장을 중단했습니다.');
- const actual=state.components.filter(b=>b.kind==='photo'||b.kind==='video'||(b.kind==='text'&&normalize(b.text)));
+ const actual=state.components.filter(b=>['photo','video','map','info'].includes(b.kind)||(b.kind==='text'&&normalize(b.text)));
  const expected=packet.blocks;
  // Combine adjacent text components, preserving photo positions and all words.
  const compact=blocks=>blocks.reduce((all,b)=>{if(b.kind==='text'&&all.at(-1)?.kind==='text')all.at(-1).text+='\n'+b.text;else all.push({...b});return all;},[]);
  const a=compact(actual),b=compact(expected);
  if(a.length!==b.length) throw new Error('본문·사진 구간 수가 원문과 다릅니다. 저장하지 않았습니다.');
- const mismatch=a.findIndex((item,i)=>item.kind!==b[i].kind||(item.kind==='text'&&normalize(item.text)!==normalize(b[i].text)));
+ const mismatch=a.findIndex((item,i)=>item.kind!==b[i].kind||(['text','info'].includes(item.kind)&&normalize(item.text)!==normalize(b[i].text)));
  if(mismatch>=0) throw new Error(`원문과 다른 구간: ${mismatch+1}/${b.length} (${b[mismatch].kind==='photo'?'사진 위치':'본문'}). 저장하지 않았습니다.`);
- if(packet.version===2||(packet.version===3&&packet.template==='record'))validateFormatting(state,packet);
+ a.forEach((item,i)=>{if(item.kind==='map')validatePlace(item.place,b[i].place);if(item.kind==='info'&&item.infoStyle!=='line')throw new Error('방문정보의 왼쪽 선 양식을 확인하지 못했습니다. 저장하지 않았습니다.');});
+ if(packet.version===2||(packet.version>=3&&packet.template==='record'))validateFormatting(state,packet);
 }
 
 export function paragraphStyle(role,bold=false){
@@ -173,8 +193,8 @@ export function paragraphStyle(role,bold=false){
 }
 
 export function validateFormatting(state,packet){
- const expected=packet.blocks.filter(b=>b.kind==='text').flatMap(b=>b.paragraphs).filter(p=>p.runs.some(r=>r.text.trim()));
- const actual=state.components.filter(b=>b.kind==='text').flatMap(b=>b.paragraphs||[]).filter(p=>p.runs.some(r=>r.text.trim()));
+ const expected=packet.blocks.filter(b=>b.kind==='text'||b.kind==='info').flatMap(b=>b.paragraphs.map(p=>({...p,quote:b.kind==='info'}))).filter(p=>p.runs.some(r=>r.text.trim()));
+ const actual=state.components.filter(b=>b.kind==='text'||b.kind==='info').flatMap(b=>b.paragraphs||[]).filter(p=>p.runs.some(r=>r.text.trim()));
  if(expected.length!==actual.length)throw new Error('서식 문단 수가 다릅니다. 저장하지 않았습니다.');
  const rgb=hex=>`rgb(${parseInt(hex.slice(1,3),16)}, ${parseInt(hex.slice(3,5),16)}, ${parseInt(hex.slice(5,7),16)})`;
  const characters=runs=>runs.flatMap(run=>[...run.text.replace(/[\s\u200b\ufeff]/g,'')].map(char=>({...run,char})));
@@ -183,7 +203,7 @@ export function validateFormatting(state,packet){
    if(want.length!==got.length||!['left','start'].includes(actual[i].align))throw new Error(`문단 ${i+1}의 내용·정렬 서식을 확인하지 못했습니다. 저장하지 않았습니다.`);
    for(let j=0;j<want.length;j++){
      const style=paragraphStyle(expected[i].role,want[j].bold),run=got[j];
-     if(run.char!==want[j].char||run.bold!==style.bold||run.size!==style.size||run.color!==rgb(style.color)||!run.font.includes('nanumgothic'))throw new Error(`문단 ${i+1}의 볼드·크기·색상·글꼴이 양식과 다릅니다. 저장하지 않았습니다.`);
+     if(run.char!==want[j].char||run.bold!==style.bold||run.size!==style.size||run.color!==rgb(style.color)||!run.font.includes(expected[i].quote?'nanumbarungothic':'nanumgothic'))throw new Error(`문단 ${i+1}의 볼드·크기·색상·글꼴이 양식과 다릅니다. 저장하지 않았습니다.`);
    }
  }
 }

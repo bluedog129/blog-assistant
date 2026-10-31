@@ -70,7 +70,7 @@ struct CampaignGuidePanel: View {
             }
             Text(item.summary).font(.caption).textSelection(.enabled)
             Text(check.detail).font(.caption).foregroundStyle(check.status == .missing ? Color.orange : .secondary)
-            DisclosureGroup("원문 근거") { Text(item.evidence).font(.caption).textSelection(.enabled) }
+            DisclosureGroup("조건 근거") { Text(item.evidence).font(.caption).textSelection(.enabled) }
             if item.kind == .photo {
                 DisclosureGroup("해당 사진 연결") {
                     ForEach(Array(photos.enumerated()).filter { !$0.element.isVideo }, id: \.element.id) { index, photo in

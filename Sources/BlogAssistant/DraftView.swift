@@ -236,15 +236,15 @@ struct DraftView: View {
             VStack(alignment: .leading, spacing: 8) {
                 if let url = NaverMapLink.url(review.naverMapURL) {
                     Link("저장한 매장 링크 확인", destination: url)
-                    Text("후기의 최신 링크를 본문에 반영합니다. [네이버지도] 위치에 표시하며, 본문과 사진 순서는 유지합니다.")
+                    Text("[네이버지도] 위치에 약도·핀·가게명·주소가 보이는 장소 블록을 넣습니다. 영업정보에 ‘주소: …’를 입력하면 가게명과 주소가 일치하는 장소를 찾습니다. 주소가 없거나 결과가 다르면 Chrome에서 직접 확인합니다.")
                         .font(.caption).foregroundStyle(.secondary)
                 } else {
                     Text(sourceReview.naverMapURL.isEmpty ? "후기 작성 준비에서 매장의 공유 링크를 저장하세요." : "후기에 저장된 링크가 없습니다. 반영하면 기존 지도 표시를 제거합니다.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Button("지도 링크 반영") { applyMapLink() }
+                Button("최신 지도·방문정보 반영") { applyMapLink() }
                     .disabled(!loaded || loadFailed || exporting || bridge.busy ||
-                              (review.naverMapURL.isEmpty && sourceReview.naverMapURL.isEmpty))
+                              (review.naverMapURL.isEmpty && sourceReview.naverMapURL.isEmpty && review.businessInfo == sourceReview.businessInfo))
                 Text("본문에 직접 적은 링크는 자동으로 바꾸지 않습니다.")
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(.vertical, 4)
@@ -256,14 +256,15 @@ struct DraftView: View {
             let updatedText = try DraftMapLink.applying(to: text, url: link)
             var snapshot = sourceReview
             snapshot.naverMapURL = link
+            snapshot.businessInfo = review.businessInfo
             let now = Date()
             draft = BlogDraft(reviewID: review.id, sourceReview: snapshot,
                               referencePostIDs: draft?.referencePostIDs ?? plan.referencePostIDs ?? [],
                               model: draft?.model ?? "직접 작성", createdAt: now, updatedAt: now,
-                              text: updatedText, photos: displayPhotos, template: template)
+                              text: updatedText, photos: displayPhotos, template: template, campaignGuide: draft?.campaignGuide)
             text = updatedText
             mapLinkChanged = true
-            message = link.isEmpty ? "지도 표시를 제거했습니다. 확인 후 초안 저장을 누르세요." : "최신 지도 링크를 반영했습니다. 미리보기 확인 후 초안 저장을 누르세요."
+            message = "최신 지도·방문정보를 반영했습니다. 미리보기 확인 후 초안 저장을 누르세요."
         } catch { message = error.localizedDescription }
     }
 
@@ -271,7 +272,11 @@ struct DraftView: View {
         let mapping = assetMap
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
-                Text("① 사진·영상 선택 · \(plan.selected.count)개").font(.headline)
+                Text("① 사진·영상 선택·설명 · \(plan.selected.count)개").font(.headline)
+                if plan.selected.contains(where: { $0.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                    Text("방문 정리에서 추가한 사진·영상의 설명을 아래에 입력하세요. 설명을 채우면 작성 요청을 복사할 수 있습니다.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Text("후기에서 저장한 메뉴 사진의 추가·교체·해제와 메뉴명을 반영합니다. 전경·반찬 등 직접 추가한 사진과 직접 편집한 설명은 유지합니다. 선택 순서가 사진 번호입니다.").font(.caption).foregroundStyle(.secondary)
                 Text("영상은 한 글에 최대 10개, 영상당 15분·변환 후 200MB까지 지원합니다. 원본은 유지하고 최대 1080p MP4로 준비합니다.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -321,7 +326,24 @@ struct DraftView: View {
         let mapping = assetMap
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
-                ForEach(DraftLayout.blocks(DraftFormatting.expandVisitInfo(text, review: sourceReview))) { block in
+                ForEach(DraftLayout.blocks(text, visitMarkers: true)) { block in
+                    if block.visitMarker == "영업정보", !BusinessSummary.rows(sourceReview.businessInfo).isEmpty {
+                        HStack(alignment: .top, spacing: 14) {
+                            Rectangle().fill(Color.secondary).frame(width: 4)
+                            formattedText(BusinessSummary.markdown(sourceReview.businessInfo), firstBlock: false, information: true)
+                                .padding(.vertical, 4)
+                        }.fixedSize(horizontal: false, vertical: true)
+                    }
+                    if block.visitMarker == "네이버지도", let place = NaverPostPacket.Place.target(sourceReview), let url = URL(string: place.url) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("장소 지도", systemImage: "map").font(.headline)
+                            Text(place.name).bold()
+                            if !place.address.isEmpty { Text(place.address).font(.callout) }
+                            Text("약도는 네이버 편집기에 삽입한 뒤 확인할 수 있습니다.").font(.caption).foregroundStyle(.secondary)
+                            Link("저장한 매장 지도 열기", destination: url)
+                        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.secondary.opacity(0.08)).cornerRadius(8)
+                    }
                     if let content = block.text { formattedText(content, firstBlock: block.id == 0) }
                     if let number = block.photoNumber {
                         if number > 0, number <= displayPhotos.count {
@@ -341,8 +363,9 @@ struct DraftView: View {
             }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
         }.border(Color.secondary.opacity(0.25))
     }
-    private func formattedText(_ content: String, firstBlock: Bool) -> some View {
-        let paragraphs = DraftFormatting.paragraphs(content, menus: sourceReview.menus)
+    private func formattedText(_ content: String, firstBlock: Bool, information: Bool = false) -> some View {
+        let parsed = DraftFormatting.paragraphs(content, menus: sourceReview.menus)
+        let paragraphs = information ? parsed.map { DraftParagraph(role: "info", runs: $0.runs) } : parsed
         return VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
                 if paragraph.text.isEmpty { Spacer().frame(height: 14) }
@@ -390,6 +413,7 @@ struct DraftView: View {
             campaignLoadFailed = true
             message = "체험단 요구사항을 읽지 못했습니다. 기존 자료 보호를 위해 가이드 변경·작성 요청·네이버 전달을 중단했습니다."
         }
+        text = CampaignDisclosure.applying(to: text, enabled: campaign.guide != nil)
         loaded = true
         repairPhotoConnectionIfNeeded()
     }
@@ -433,6 +457,7 @@ struct DraftView: View {
         guard !campaignLoadFailed, !loadFailed, !exporting, !bridge.busy else { throw CampaignGuide.invalid("현재는 가이드를 저장할 수 없습니다.") }
         try CampaignGuideStore().save(value, reviewID: review.id)
         campaign = value
+        text = CampaignDisclosure.applying(to: text, enabled: value.guide != nil)
     }
     private func copyRequest() {
         guard canCopyRequest else { return }
@@ -480,6 +505,7 @@ struct DraftView: View {
     }
     private func applyPaste(_ value: String) {
         let now = Date()
+        let value = CampaignDisclosure.applying(to: value, enabled: campaign.guide != nil)
         draft = BlogDraft(reviewID: review.id, sourceReview: plan.requestReview ?? review,
                           referencePostIDs: plan.referencePostIDs ?? [], model: "ChatGPT 수동 가져오기",
                           createdAt: now, updatedAt: now, text: value, photos: plan.requestPhotos ?? plan.selected)
@@ -490,6 +516,7 @@ struct DraftView: View {
     }
     @discardableResult private func save() -> Bool {
         guard !loadFailed else { return false }
+        text = CampaignDisclosure.applying(to: text, enabled: campaign.guide != nil)
         repairPhotoConnectionIfNeeded()
         let now = Date()
         var value = draft ?? BlogDraft(reviewID: review.id, sourceReview: plan.requestReview ?? review,

@@ -25,6 +25,11 @@ enum BusinessSummary {
     private struct Entry { var days: [Int]?; let value: String }
     private static let weekdays = ["월", "화", "수", "목", "금", "토", "일"]
     private static let labels: [(String, String)] = [
+        ("도로명주소", "주소"), ("매장주소", "주소"), ("주소", "주소"),
+        ("전화번호", "전화번호"), ("연락처", "전화번호"), ("전화", "전화번호"), ("Tel", "전화번호"),
+        ("주차정보", "주차"), ("주차", "주차"), ("아기의자", "아기의자"), ("유아의자", "아기의자"),
+        ("지하철", "교통"), ("교통", "교통"),
+        ("체험단 방문시간", "체험단 방문시간"), ("방문가능 시간", "방문가능 시간"), ("방문가능시간", "방문가능 시간"),
         ("브레이크 타임", "브레이크타임"), ("브레이크타임", "브레이크타임"),
         ("라스트 오더", "라스트오더"), ("라스트오더", "라스트오더"), ("마지막 주문", "라스트오더"),
         ("정기휴무", "휴무"), ("휴무일", "휴무"), ("휴무", "휴무"),
@@ -87,7 +92,8 @@ enum BusinessSummary {
                     continue
                 }
                 // Holiday descriptions already carrying weekdays should not gain a second prefix.
-                var scopedDays = label == "휴무" && line.contains("요일") ? nil : currentDays
+                let schedule = ["휴무", "영업시간", "브레이크타임", "라스트오더", "방문가능 시간", "체험단 방문시간"].contains(label)
+                var scopedDays = !schedule || (label == "휴무" && line.contains("요일")) ? nil : currentDays
                 if label != "휴무", let innerDay = dayPrefix(line), !innerDay.rest.isEmpty {
                     scopedDays = innerDay.days
                     line = innerDay.rest
@@ -112,7 +118,7 @@ enum BusinessSummary {
             }
         }
         if let pendingDay { other.append(pendingDay) }
-        var result = ["휴무", "영업시간", "브레이크타임", "라스트오더"].compactMap { label -> Row? in
+        var result = ["주소", "영업시간", "브레이크타임", "라스트오더", "휴무", "전화번호", "주차", "교통", "아기의자", "방문가능 시간", "체험단 방문시간"].compactMap { label -> Row? in
             guard let entries = values[label], !entries.isEmpty else { return nil }
             return Row(label: label, value: grouped(entries).joined(separator: "\n"))
         }
@@ -123,11 +129,32 @@ enum BusinessSummary {
     static func markdown(_ source: String) -> String {
         let rows = rows(source)
         guard !rows.isEmpty else { return "" }
-        return "## 방문 전 확인\n\n" + rows.map { row in
+        return rows.map { row in
             let lines = row.value.components(separatedBy: "\n")
-            if lines.count == 1 { return "**\(row.label)**: \(row.value)" }
-            return "**\(row.label)**\n" + lines.map { "· " + $0 }.joined(separator: "\n")
-        }.joined(separator: "\n\n")
+            if row.label == "추가 정보" { return row.value }
+            return "\(icon(row.label)) **\(row.label):** \(lines[0])" + lines.dropFirst().map { "\n　　" + $0 }.joined()
+        }.joined(separator: "\n")
+    }
+
+    static func icon(_ label: String) -> String {
+        switch label {
+        case "주소": return "📍"
+        case "영업시간": return "⏰"
+        case "브레이크타임": return "☕"
+        case "라스트오더": return "🍽️"
+        case "휴무": return "📅"
+        case "전화번호": return "☎️"
+        case "주차": return "🚗"
+        case "교통": return "🚇"
+        case "아기의자": return "🪑"
+        default: return "🕒"
+        }
+    }
+
+    static func paragraphs(_ source: String) -> [DraftParagraph] {
+        markdown(source).components(separatedBy: "\n").filter { !$0.isEmpty }.map {
+            DraftParagraph(role: "info", runs: DraftFormatting.inline($0))
+        }
     }
 
     private static func grouped(_ entries: [Entry]) -> [String] {

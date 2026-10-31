@@ -8,6 +8,11 @@ struct NearbyPhoto: Identifiable {
     var id: String { asset.localIdentifier }
 }
 
+struct LibraryPhotoPage {
+    let assets: [PHAsset]
+    let total: Int
+}
+
 struct PhotoDay: Identifiable {
     let date: Date?
     let visits: [PhotoVisit]
@@ -68,6 +73,36 @@ final class PhotoLibraryStore: NSObject, ObservableObject, PHPhotoLibraryChangeO
             if asset.mediaType == .image || asset.mediaType == .video { assets.append(asset) }
         }
         return assets
+    }
+
+    // Fetch metadata in pages; thumbnails are requested only by visible cells.
+    func libraryPhotos(offset: Int, before: Date?) async throws -> LibraryPhotoPage {
+        guard canRead else { throw photoSearchFailure("사진 보관함 접근 권한이 필요합니다.") }
+        let task = Task.detached(priority: .userInitiated) { () throws -> LibraryPhotoPage in
+            let options = PHFetchOptions()
+            options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+            var predicates = [NSPredicate(format: "mediaType == %d OR mediaType == %d", PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue)]
+            if let before { predicates.append(NSPredicate(format: "creationDate < %@", before as NSDate)) }
+            options.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+            let result = PHAsset.fetchAssets(with: options)
+            var assets: [PHAsset] = []
+            for index in LibraryPhotoPaging.range(offset: offset, total: result.count) {
+                try Task.checkCancellation()
+                assets.append(result.object(at: index))
+            }
+            return LibraryPhotoPage(assets: assets, total: result.count)
+        }
+        let page = try await withTaskCancellationHandler(operation: { try await task.value }, onCancel: { task.cancel() })
+        try Task.checkCancellation()
+        guard canRead else { throw photoSearchFailure("사진 보관함 접근 권한이 필요합니다.") }
+        return page
+    }
+
+    func browsingDays(for assets: [PHAsset]) -> [PhotoDay] {
+        let groups = Dictionary(grouping: assets) { $0.creationDate.map { Calendar.current.startOfDay(for: $0) } }
+        return groups.keys.sorted { ($0 ?? .distantPast) > ($1 ?? .distantPast) }.map {
+            Self.makeDay(date: $0, assets: groups[$0] ?? [], assignments: visitGroups.assignments)
+        }
     }
 
     func nearbyPhotos(photoIDs: [String], referenceID: String, radius: Double) async throws -> [NearbyPhoto] {

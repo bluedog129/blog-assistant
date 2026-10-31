@@ -1,5 +1,13 @@
 import Foundation
 
+enum LibraryPhotoPaging {
+    static let size = 200
+    static func range(offset: Int, total: Int) -> Range<Int> {
+        let start = min(max(0, offset), max(0, total))
+        return start..<min(start + size, max(0, total))
+    }
+}
+
 // Selected additional photos are separate from visit membership and menu facts.
 final class VisitPhotoSelectionStore {
     private struct Record: Codable {

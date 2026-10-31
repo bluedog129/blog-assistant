@@ -6,6 +6,8 @@ export function editorSummary(state) {
     imageCount: state.imageCount,
     videoCount: state.videoCount,
     videoReadyCount: state.videoReadyCount,
+    mapCount: Number(state.mapCount||0),
+    mapReadyCount: (state.components||[]).filter(b=>b.kind==='map'&&b.place?.ready===true).length,
     fileInputCount: state.fileInputCount,
     recoveryPrompt: state.recoveryPrompt,
     upload: state.uploadDiagnostics

@@ -1,6 +1,7 @@
 import {inspectVideoUploader,videoUploadPoint,supplyVideoChunk,clearVideoTransfer} from './video-upload.js';
 import {validatePacket,inspectEditor,supplyPhoto,preparePhotoUpload,photoUploadComplete,restorePhotoPicker,editorPoint,validateContent,formattingControls,paragraphStyle} from './post-packet.js';
 import {createPostingDiagnostics,waitForEditor,editorSummary,errorDetails} from './posting-diagnostics.js';
+import {inspectPlaceDialog,placeControlPoint,matchingPlaceIndex,validatePlace,infoBlockPoint,confirmedPlaceKey,confirmSelectedPlace,rememberedPlace} from './visit-blocks.js';
 const $=id=>document.getElementById(id);
 function renderDiagnostics(value){
  if($('diagnosticLog'))$('diagnosticLog').textContent=JSON.stringify(value,null,2);
@@ -49,7 +50,7 @@ async function pointFor(kind){
  return execute(editorPoint,[packet.blogID,kind]);
 }
 async function command(method,params={}){await checkActiveJob();await chrome.debugger.sendCommand({tabId:tabID},method,params);}
-async function click(point){if(!point)throw new Error('편집기 버튼·입력 위치를 확인하지 못했습니다.');await command('Input.dispatchMouseEvent',{type:'mousePressed',x:point.x,y:point.y,button:'left',clickCount:1});await command('Input.dispatchMouseEvent',{type:'mouseReleased',x:point.x,y:point.y,button:'left',clickCount:1});await delay(250);}
+async function click(point){if(point?.error)throw new Error(point.error);if(!point)throw new Error('편집기 버튼·입력 위치를 확인하지 못했습니다.');await command('Input.dispatchMouseEvent',{type:'mousePressed',x:point.x,y:point.y,button:'left',clickCount:1});await command('Input.dispatchMouseEvent',{type:'mouseReleased',x:point.x,y:point.y,button:'left',clickCount:1});await delay(250);}
 async function key(name,code,vk){await command('Input.dispatchKeyEvent',{type:'keyDown',key:name,code,windowsVirtualKeyCode:vk});await command('Input.dispatchKeyEvent',{type:'keyUp',key:name,code,windowsVirtualKeyCode:vk});}
 async function insertBodyText(text) {
  const lines=text.replace(/\r\n?/g,'\n').split('\n');
@@ -136,6 +137,73 @@ async function uploadVideoFile(file){
    clearTimeout(timer);chrome.debugger.onEvent.removeListener(listener);
  }
 }
+async function insertPlace(place) {
+ const original={...place};
+ let remembered=null;
+ try{remembered=rememberedPlace((await chrome.storage.local.get('confirmedPlacesV1')).confirmedPlacesV1,original);}catch{}
+ place=remembered||place;
+ let manuallySelected=false;
+ diagnostics.record('place-search',{remembered:!!remembered,hasAddress:!!place.address.trim()});
+ const before=await inspect();
+ await click(await execute(placeControlPoint,[packet.blogID,'toolbar']));
+ let dialog;
+ const waitDialog=async(test,message,timeout=30000)=>{
+  const start=Date.now();
+  while(Date.now()-start<timeout){check();dialog=await execute(inspectPlaceDialog,[packet.blogID]);if(test(dialog))return dialog;await delay(500);}
+  throw new Error(message);
+ };
+ await waitDialog(s=>s.open,'장소 검색창을 확인하지 못했습니다.');
+ await click(await execute(placeControlPoint,[packet.blogID,'search']));
+ await command('Input.insertText',{text:place.name});await key('Enter','Enter',13);
+ await waitDialog(s=>s.results.length>0||!s.open,'장소 검색 결과가 없습니다. 매장 이름과 주소를 확인하세요.');
+ const index=matchingPlaceIndex(dialog.results,place);
+ if(dialog.open&&index>=0&&!dialog.confirmEnabled){
+  const expected=dialog.results[index];
+  await click(await execute(placeControlPoint,[packet.blogID,'result',index,expected]));
+  await click(await execute(placeControlPoint,[packet.blogID,'add',index,expected]));
+  await waitDialog(s=>s.confirmEnabled,'장소 선택을 확인하지 못했습니다.');
+  await click(await execute(placeControlPoint,[packet.blogID,'confirm']));
+ }else if(dialog.open){
+  manuallySelected=true;
+  status('장소 확인 필요: Chrome 장소 창에서 저장한 매장 링크의 가게명·주소를 확인하고 ‘추가 → 확인’을 눌러주세요. 선택한 네이버 장소를 기억해 다음부터 자동으로 사용합니다.');
+  await waitDialog(s=>!s.open,'장소 확인을 기다리다 중단했습니다. 영업정보에 정확한 주소를 저장하거나 Chrome 장소 창에서 선택한 뒤 다시 시도하세요.',360000);
+ }
+ const state=await waitFor(s=>Number(s.mapCount||0)===Number(before.mapCount||0)+1&&s.components.filter(b=>b.kind==='map').at(-1)?.place?.ready===true,'장소 약도의 로딩 완료를 확인하지 못했습니다.',60000);
+ const actual=state.components.filter(b=>b.kind==='map').at(-1).place;
+ const confirmed=manuallySelected?confirmSelectedPlace(actual,original):place;
+ validatePlace(actual,confirmed);
+ diagnostics.record('place-verified',{manuallySelected,remembered:!!remembered,nameMatches:true,addressPresent:!!actual.address,ready:actual.ready});
+ if(manuallySelected){
+  try{
+   const records=(await chrome.storage.local.get('confirmedPlacesV1')).confirmedPlacesV1||{};
+   const key=confirmedPlaceKey(original);
+   const entries=Object.entries(records).filter(([k])=>k!==key).slice(-99);
+   await chrome.storage.local.set({confirmedPlacesV1:Object.fromEntries([...entries,[key,confirmed]])});
+  }catch{diagnostics.record('place-memory-unavailable');}
+ }
+ await waitFor(s=>s.components?.at(-1)?.kind==='text'&&!!s.bodyPoint,'지도 뒤 본문 위치를 확인하지 못했습니다.',10000);
+ await click(await pointFor('body'));await key('End','End',35);
+ return confirmed;
+}
+async function insertInfo(paragraphs) {
+ const before=(await inspect()).components.filter(b=>b.kind==='info').length;
+ await click(await execute(infoBlockPoint,[packet.blogID,'menu']));
+ await click(await execute(infoBlockPoint,[packet.blogID,'line']));
+ await waitFor(s=>s.components.filter(b=>b.kind==='info').length===before+1,'방문정보 인용구를 확인하지 못했습니다.');
+ await click(await execute(infoBlockPoint,[packet.blogID,'content']));
+ // Naver's quotation uses its fixed Nanum Barun Gothic family.
+ await chooseStyle('line-height','180');
+ for(const name of ['italic','underline']){const control=await styleControl(name);if(control.selected)await click(control.point);}
+ await insertStyledText(paragraphs);
+ await click(await execute(infoBlockPoint,[packet.blogID,'after']));
+ await waitFor(s=>s.components?.at(-1)?.kind==='text'&&!!s.bodyPoint,'방문정보 뒤 본문 위치를 확인하지 못했습니다.',10000);
+ await click(await pointFor('body'));await key('End','End',35);
+}
+function previewBlock(block){
+ if(block.kind==='map')return `[장소 지도] ${block.place.name}${block.place.address?' · '+block.place.address:''}`;
+ if(block.kind==='text'||block.kind==='info')return block.text;
+ return `[${block.kind==='video'?'영상':'사진'} ${block.photoNumber}] ${packet.photos[block.photoNumber-1].caption}`;
+}
 $('files').addEventListener('change',async()=>{
  packet=null;$('start').disabled=true;$('preview').replaceChildren();
  try{
@@ -144,7 +212,7 @@ $('files').addEventListener('change',async()=>{
    const json=files.get('naver-post.json');if(!json||json.size>1000000)throw new Error('naver-post.json과 사진·영상 파일들을 함께 선택하세요.');
    packet=validatePacket(JSON.parse(await json.text()),files);
    const title=document.createElement('h2');title.textContent=packet.title;$('preview').append(title);
-   for(const block of packet.blocks){const p=document.createElement('p');p.textContent=block.kind==='text'?block.text:`[${block.kind==='video'?'영상':'사진'} ${block.photoNumber}] ${packet.photos[block.photoNumber-1].caption}`;$('preview').append(p);}
+   for(const block of packet.blocks){const p=document.createElement('p');p.textContent=previewBlock(block);$('preview').append(p);}
    status(`bluedog129 / 맛집탐방 · 사진·영상 ${packet.photos.length}개 준비 완료`);$('start').disabled=false;
  }catch(error){status(error.message);}
 });
@@ -164,7 +232,7 @@ async function runPosting(){
    await chrome.debugger.attach({tabId:tabID},'1.3');attached=true;
    await command('Page.setInterceptFileChooserDialog',{enabled:true});
    let state=await inspect();
-   if(state.title||state.texts.some(t=>t)||state.imageCount||state.videoCount)throw new Error('이전 작성 글이 열린 상태입니다. 기존 글을 저장하거나 보관한 뒤 빈 새 글로 다시 시도하세요. 기존 내용을 덮어쓰지 않았습니다.');
+   if(state.title||state.texts.some(t=>t)||state.imageCount||state.videoCount||state.mapCount||state.components.some(b=>b.kind==='info'))throw new Error('이전 작성 글이 열린 상태입니다. 기존 글을 저장하거나 보관한 뒤 빈 새 글로 다시 시도하세요. 기존 내용을 덮어쓰지 않았습니다.');
    await delay(800);
    diagnostics.stage({stage:'제목 입력'});
    status('제목 입력 중…');await click(await pointFor('title'));await command('Input.insertText',{text:packet.title});
@@ -175,8 +243,14 @@ async function runPosting(){
      check();const block=packet.blocks[i];status(`본문 입력 ${i+1}/${packet.blocks.length}`);
      if(block.kind==='text'){
        diagnostics.stage({stage:'본문 입력',blockNumber:i+1,blockTotal:packet.blocks.length});
-       if(packet.version===2||(packet.version===3&&packet.template==='record')){await prepareRecordStyle();await insertStyledText(block.paragraphs);}else await insertBodyText(block.text);
+       if(packet.version===2||(packet.version>=3&&packet.template==='record')){await prepareRecordStyle();await insertStyledText(block.paragraphs);}else await insertBodyText(block.text);
        await delay(200);await key('Enter','Enter',13);await key('Enter','Enter',13);
+     }else if(block.kind==='map'){
+       diagnostics.stage({stage:'장소 지도 삽입',blockNumber:i+1,blockTotal:packet.blocks.length});
+       block.place=await insertPlace(block.place);
+     }else if(block.kind==='info'){
+       diagnostics.stage({stage:'방문정보 양식 입력',blockNumber:i+1,blockTotal:packet.blocks.length});
+       await insertInfo(block.paragraphs);
      }else if(block.kind==='video'){
        const media=packet.photos[block.photoNumber-1];
        const before=await inspect();
@@ -267,7 +341,7 @@ async function receiveFromApp(){
    files=new Map();
    for(const photo of value.photos){
      if(photo.mediaType==='video'){
-       if(value.version!==3||!Number.isInteger(photo.byteCount)||photo.byteCount<1||photo.byteCount>200000000)throw new Error('앱의 영상 파일 정보를 확인하지 못했습니다.');
+       if(value.version<3||!Number.isInteger(photo.byteCount)||photo.byteCount<1||photo.byteCount>200000000)throw new Error('앱의 영상 파일 정보를 확인하지 못했습니다.');
        files.set(photo.filename,{name:photo.filename,size:photo.byteCount,type:'video/mp4',bridgeMediaNumber:photo.number});
        continue;
      }

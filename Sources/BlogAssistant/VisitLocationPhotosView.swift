@@ -15,7 +15,6 @@ struct VisitLocationPhotosView: View {
     @State private var loadFailed = false
     @State private var errorMessage: String?
     @State private var searchTask: Task<Void, Never>?
-    @State private var pendingPhoto: DraftPhoto?
 
     private var references: [PHAsset] {
         library.assets(for: sourcePhotoIDs).filter { LocationPhotoSearch.isValid($0.location) }.sorted {
@@ -73,7 +72,7 @@ struct VisitLocationPhotosView: View {
                     }
                 }
             }
-            Text("주변 가게 사진도 포함될 수 있으니 촬영일·거리를 확인하고 선택하세요. 추가·제외는 바로 저장됩니다.")
+            Text("주변 가게 사진도 포함될 수 있으니 촬영일·거리를 확인하고 선택하세요. 추가·제외는 바로 저장됩니다. 설명은 정리 완료 후 블로그 초안에서 입력합니다.")
                 .font(.caption).foregroundStyle(.secondary)
             if let errorMessage { Text(errorMessage).font(.caption).foregroundStyle(.orange) }
             ScrollView {
@@ -94,7 +93,8 @@ struct VisitLocationPhotosView: View {
                                 Text(match.asset.creationDate?.formatted(date: .numeric, time: .omitted) ?? "촬영일 없음").font(.caption)
                                 Text("기준 위치에서 약 \(Int(match.distance.rounded()))m").font(.caption).foregroundStyle(.secondary)
                                 Button("사진 추가") {
-                                    pendingPhoto = DraftPhoto(id: match.id, previousVisitDate: match.asset.creationDate)
+                                    guard canSave, !library.assets(for: [match.id]).isEmpty else { return }
+                                    save(selected + [DraftPhoto(id: match.id, previousVisitDate: match.asset.creationDate)])
                                 }.disabled(!canSave)
                             }
                         }
@@ -112,26 +112,6 @@ struct VisitLocationPhotosView: View {
             }
         }
         .onDisappear { searchTask?.cancel() }
-        .sheet(item: $pendingPhoto) { photo in
-            if let asset = library.assets(for: [photo.id]).first {
-                PhotoCaptionEntry(asset: asset, manager: library.imageManager, previousVisitDate: photo.previousVisitDate) { caption in
-                    guard canSave, !library.assets(for: [photo.id]).isEmpty else {
-                        errorMessage = "사진을 추가할 수 없습니다. 접근 권한과 사진 목록을 확인하세요."
-                        return
-                    }
-                    var updated = selected
-                    if !updated.contains(where: { $0.id == photo.id }) {
-                        updated.append(DraftPhoto(id: photo.id, caption: caption, previousVisitDate: photo.previousVisitDate))
-                    }
-                    save(updated)
-                }
-            } else {
-                VStack(spacing: 12) {
-                    Text("사진을 사용할 수 없습니다. 사진 접근 권한과 보관함을 확인하세요.")
-                    Button("닫기") { pendingPhoto = nil }
-                }.padding(24)
-            }
-        }
     }
 
     private var selectedPhotos: some View {
